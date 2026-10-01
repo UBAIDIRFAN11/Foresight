@@ -13,18 +13,35 @@ struct GoalsView: View {
     @Query private var goals: [FinancialGoal]
     @State private var filter: GoalFilter = .all
     @State private var isAddingGoal = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private let today = Date()
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                Picker("Filter", selection: $filter) {
-                    ForEach(GoalFilter.allCases) { option in
-                        Text("\(option.rawValue) (\(count(for: option)))").tag(option)
+                if dynamicTypeSize.isAccessibilitySize {
+                    Menu {
+                        Picker("Filter", selection: $filter) {
+                            ForEach(GoalFilter.allCases) { option in
+                                Text("\(option.rawValue) (\(count(for: option)))").tag(option)
+                            }
+                        }
+                    } label: {
+                        Label("\(filter.rawValue) (\(count(for: filter)))", systemImage: "line.3.horizontal.decrease.circle")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .foresightCard()
+                } else {
+                    Picker("Filter", selection: $filter) {
+                        ForEach(GoalFilter.allCases) { option in
+                            Text("\(option.rawValue) (\(count(for: option)))").tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
 
                 if filteredGoals.isEmpty {
                     ContentUnavailableView("No Goals", systemImage: "flag", description: Text("Add a goal to start planning against your monthly capacity."))
@@ -39,7 +56,7 @@ struct GoalsView: View {
                     }
                 }
             }
-            .padding()
+            .foresightReadableContent()
         }
         .background(ForesightTheme.background)
         .toolbar {

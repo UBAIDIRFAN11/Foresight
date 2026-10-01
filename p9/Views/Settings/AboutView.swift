@@ -21,7 +21,7 @@ struct AboutView: View {
                 aboutSection("Purpose", "Foresight helps people estimate whether their savings capacity can meet personal financial goals by a target date using information stored locally on this device.")
                 aboutSection("Disclaimer", "Foresight provides planning estimates based on the information you enter. It does not provide financial advice.")
             }
-            .padding()
+            .foresightReadableContent()
         }
         .background(ForesightTheme.background)
         .navigationTitle("About")

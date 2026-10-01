@@ -5,6 +5,9 @@ struct GoalCard: View {
     let profile: FinancialProfile
     let today: Date
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .title) private var iconSize = 82
+
     private var result: FinancialCalculationResult {
         FinancialCalculator.evaluate(
             FinancialInputs(
@@ -20,7 +23,11 @@ struct GoalCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+
+            layout {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(ForesightTheme.accentSoft)
@@ -28,44 +35,51 @@ struct GoalCard: View {
                         .font(.title)
                         .foregroundStyle(ForesightTheme.accent)
                 }
-                .frame(width: 82, height: 82)
+                .frame(width: iconSize, height: iconSize)
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(goal.name)
                             .font(.title3.weight(.bold))
-                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.right")
                             .font(.headline.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
                     if let goalDescription = goal.goalDescription {
                         Text(goalDescription)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     ProgressView(value: result.progress)
                         .tint(ForesightTheme.accent)
                     Text("\(MoneyFormatting.display(profile.currentSavingsMinor, currencyCode: profile.preferredCurrencyCode)) of \(MoneyFormatting.display(goal.targetAmountMinor, currencyCode: profile.preferredCurrencyCode))")
                         .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
-            HStack {
-                Label(formattedTargetDate, systemImage: "calendar")
-                Spacer()
-                GoalStatusBadge(result: result)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline) {
+                    Label(formattedTargetDate, systemImage: "calendar")
+                    Spacer(minLength: 12)
+                    GoalStatusBadge(result: result)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(formattedTargetDate, systemImage: "calendar")
+                    GoalStatusBadge(result: result)
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            HStack {
-                Text("Required each month")
-                Spacer()
-                Text(MoneyFormatting.display(result.monthlyRequiredMinor, currencyCode: profile.preferredCurrencyCode))
-                    .fontWeight(.bold)
-            }
+            AdaptiveValueRow(
+                title: "Required each month",
+                value: MoneyFormatting.display(result.monthlyRequiredMinor, currencyCode: profile.preferredCurrencyCode)
+            )
             .font(.footnote)
         }
         .foresightCard()

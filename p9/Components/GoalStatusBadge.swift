@@ -7,7 +7,7 @@ struct GoalStatusBadge: View {
         Label(title, systemImage: icon)
             .font(.caption.weight(.semibold))
             .foregroundStyle(color)
-            .lineLimit(1)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var title: String {

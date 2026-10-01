@@ -24,15 +24,19 @@ struct GoalDetailView: View {
             if let goal = goals.first {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
+                        Text(goal.name)
+                            .font(.largeTitle.weight(.bold))
+                            .fixedSize(horizontal: false, vertical: true)
                         GoalCard(goal: goal, profile: profile, today: today)
                         detailRows(for: goal)
+                        deleteButton
                         if let errorMessage {
                             Text(errorMessage)
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(ForesightTheme.warning)
                         }
                     }
-                    .padding()
+                    .foresightReadableContent()
                 }
                 .background(ForesightTheme.background)
                 .navigationTitle(goal.name)
@@ -40,13 +44,6 @@ struct GoalDetailView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Edit") {
                             isEditing = true
-                        }
-                    }
-                    ToolbarItem(placement: .bottomBar) {
-                        Button(role: .destructive) {
-                            isConfirmingDelete = true
-                        } label: {
-                            Label("Delete Goal", systemImage: "trash")
                         }
                     }
                 }
@@ -62,8 +59,11 @@ struct GoalDetailView: View {
                     Button("Cancel", role: .cancel) {}
                 }
             } else {
-                ContentUnavailableView("Goal Missing", systemImage: "questionmark.folder", description: Text("This goal is no longer available."))
-                    .background(ForesightTheme.background)
+                ScrollView {
+                    ContentUnavailableView("Goal Missing", systemImage: "questionmark.folder", description: Text("This goal is no longer available."))
+                        .foresightReadableContent()
+                }
+                .background(ForesightTheme.background)
             }
         }
     }
@@ -80,24 +80,26 @@ struct GoalDetailView: View {
             )
         )
         return VStack(alignment: .leading, spacing: 12) {
-            detailRow("Monthly capacity", MoneyFormatting.display(result.monthlyCapacityMinor, currencyCode: profile.preferredCurrencyCode))
-            detailRow("Remaining", MoneyFormatting.display(result.remainingMinor, currencyCode: profile.preferredCurrencyCode))
-            detailRow("Required each month", MoneyFormatting.display(result.monthlyRequiredMinor, currencyCode: profile.preferredCurrencyCode))
-            detailRow("Deadline balance", MoneyFormatting.display(result.deadlineBalanceMinor, currencyCode: profile.preferredCurrencyCode))
-            detailRow("Priority", goal.priority.title)
+            AdaptiveValueRow(title: "Monthly capacity", value: MoneyFormatting.display(result.monthlyCapacityMinor, currencyCode: profile.preferredCurrencyCode))
+            AdaptiveValueRow(title: "Remaining", value: MoneyFormatting.display(result.remainingMinor, currencyCode: profile.preferredCurrencyCode))
+            AdaptiveValueRow(title: "Required each month", value: MoneyFormatting.display(result.monthlyRequiredMinor, currencyCode: profile.preferredCurrencyCode))
+            AdaptiveValueRow(title: "Deadline balance", value: MoneyFormatting.display(result.deadlineBalanceMinor, currencyCode: profile.preferredCurrencyCode))
+            AdaptiveValueRow(title: "Priority", value: goal.priority.title)
         }
         .foresightCard()
     }
 
-    private func detailRow(_ title: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .fontWeight(.semibold)
-                .multilineTextAlignment(.trailing)
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            isConfirmingDelete = true
+        } label: {
+            Label("Delete Goal", systemImage: "trash")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
     }
 
     private func delete(_ goal: FinancialGoal) {

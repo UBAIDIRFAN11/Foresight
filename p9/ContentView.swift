@@ -17,25 +17,32 @@ struct ContentView: View {
             switch loadState {
             case .loading:
                 ProgressView("Loading Foresight")
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(ForesightTheme.background)
             case .failed(let message):
-                VStack(spacing: 16) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
-                        .foregroundStyle(ForesightTheme.warning)
-                    Text("Foresight could not open your local data.")
-                        .font(.headline)
-                    Text(message)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button("Retry") {
-                        loadProfile()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.largeTitle)
+                            .foregroundStyle(ForesightTheme.warning)
+                        Text("Foresight could not open your local data.")
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Retry") {
+                            loadProfile()
+                        }
+                        .foresightPrimaryAction()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .foresightReadableContent()
+                    .frame(maxWidth: .infinity, minHeight: 400)
                 }
-                .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ForesightTheme.background)
             case .needsProfile:

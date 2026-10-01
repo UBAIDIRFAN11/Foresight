@@ -20,6 +20,15 @@ struct FinancialProfileView: View {
     @State private var currencyCode = "AUD"
     @State private var errorMessage: String?
     @State private var hasLoadedDraft = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .title) private var iconWidth = 42
+    @FocusState private var focusedField: MoneyField?
+
+    private enum MoneyField {
+        case currentSavings
+        case monthlyIncome
+        case recurringExpenses
+    }
 
     init(mode: Mode, onProfileSaved: ((FinancialProfile) -> Void)? = nil) {
         self.mode = mode
@@ -89,15 +98,24 @@ struct FinancialProfileView: View {
                     Text(modeTitle)
                         .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .foresightPrimaryAction()
             }
-            .padding()
+            .foresightReadableContent()
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(ForesightTheme.background)
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    focusedField = nil
+                }
+            }
+        }
         .onAppear(perform: loadDraftIfNeeded)
         .onChange(of: currencyCode) { oldValue, newValue in
             guard hasLoadedDraft, oldValue != newValue else { return }
@@ -141,28 +159,43 @@ struct FinancialProfileView: View {
             Text("Estimated Monthly Savings")
                 .font(.headline)
                 .foregroundStyle(ForesightTheme.success)
-            Text("\(MoneyFormatting.display(capacity, currencyCode: currencyCode))/month")
-                .font(.title.weight(.bold))
+            ViewThatFits(in: .horizontal) {
+                Text("\(MoneyFormatting.display(capacity, currencyCode: currencyCode))/month")
+                    .font(.title.weight(.bold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(MoneyFormatting.display(capacity, currencyCode: currencyCode))
+                        .font(.title.weight(.bold))
+                    Text("per month")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
             Text("Based on your income and expenses")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.green.opacity(0.15))
+        .background(ForesightTheme.savingsSurface)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.green.opacity(0.35), lineWidth: 1.5)
+                .stroke(ForesightTheme.savingsBorder, lineWidth: 1.5)
         }
     }
 
     private func moneyField(title: String, icon: String, text: Binding<String>) -> some View {
-        HStack(spacing: 14) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 14))
+
+        return layout {
             Image(systemName: icon)
                 .font(.title)
                 .foregroundStyle(ForesightTheme.accent)
-                .frame(width: 42)
+                .frame(width: iconWidth, alignment: .center)
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
                     .font(.subheadline)
@@ -170,9 +203,21 @@ struct FinancialProfileView: View {
                 TextField("0", text: text)
                     .keyboardType(.decimalPad)
                     .font(.title3.weight(.semibold))
+                    .focused($focusedField, equals: field(for: title))
             }
         }
         .foresightCard()
+    }
+
+    private func field(for title: String) -> MoneyField {
+        switch title {
+        case "Current Savings":
+            .currentSavings
+        case "Monthly Income":
+            .monthlyIncome
+        default:
+            .recurringExpenses
+        }
     }
 
     private func loadDraftIfNeeded() {

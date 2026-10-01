@@ -7,6 +7,7 @@ struct HomeView: View {
     let onEvaluatePurchase: () -> Void
     @Query(sort: [SortDescriptor(\FinancialGoal.targetDate), SortDescriptor(\FinancialGoal.createdAt)]) private var goals: [FinancialGoal]
     @State private var focusedGoalID: UUID?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private let today = Date()
 
@@ -50,9 +51,9 @@ struct HomeView: View {
                     Label("Evaluate a Purchase", systemImage: "chevron.right")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .foresightPrimaryAction()
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Recent Decisions")
@@ -62,7 +63,7 @@ struct HomeView: View {
                         .foresightCard()
                 }
             }
-            .padding()
+            .foresightReadableContent()
         }
         .background(ForesightTheme.background)
         .navigationDestination(for: UUID.self) { id in
@@ -86,19 +87,41 @@ struct HomeView: View {
 
     private var capacityCard: some View {
         let capacity = profile.monthlyIncomeMinor - profile.recurringExpensesMinor
-        return HStack(spacing: 16) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 16))
+
+        return layout {
             Image(systemName: "chart.bar")
                 .font(.largeTitle)
                 .foregroundStyle(ForesightTheme.accent)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Monthly Savings Capacity")
                     .font(.headline)
-                Text("\(MoneyFormatting.display(capacity, currencyCode: profile.preferredCurrencyCode))/month")
-                    .font(.title.weight(.bold))
-                    .minimumScaleFactor(0.7)
-                Text("\(MoneyFormatting.display(profile.monthlyIncomeMinor, currencyCode: profile.preferredCurrencyCode)) income - \(MoneyFormatting.display(profile.recurringExpensesMinor, currencyCode: profile.preferredCurrencyCode)) expenses")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                ViewThatFits(in: .horizontal) {
+                    Text("\(MoneyFormatting.display(capacity, currencyCode: profile.preferredCurrencyCode))/month")
+                        .font(.title.weight(.bold))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(MoneyFormatting.display(capacity, currencyCode: profile.preferredCurrencyCode))
+                            .font(.title.weight(.bold))
+                        Text("per month")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    AdaptiveValueRow(
+                        title: "Income",
+                        value: MoneyFormatting.display(profile.monthlyIncomeMinor, currencyCode: profile.preferredCurrencyCode)
+                    )
+                    AdaptiveValueRow(
+                        title: "Expenses",
+                        value: MoneyFormatting.display(profile.recurringExpensesMinor, currencyCode: profile.preferredCurrencyCode)
+                    )
+                }
+                .font(.caption)
             }
         }
         .foresightCard()

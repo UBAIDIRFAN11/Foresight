@@ -15,13 +15,22 @@ struct GoalEditorView: View {
     @State private var goalDescription = ""
     @State private var errorMessage: String?
     @State private var loaded = false
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case targetAmount
+    }
 
     var body: some View {
         Form {
             Section("Goal") {
                 TextField("Name", text: $name)
-                TextField("Target amount", text: $targetAmount)
-                    .keyboardType(.decimalPad)
+                LabeledContent("Target amount") {
+                    TextField("0", text: $targetAmount)
+                        .keyboardType(.decimalPad)
+                        .focused($focusedField, equals: .targetAmount)
+                        .multilineTextAlignment(.trailing)
+                }
                 DatePicker("Target date", selection: $targetDate, displayedComponents: .date)
                 Picker("Priority", selection: $priority) {
                     ForEach(GoalPriority.allCases) { value in
@@ -29,7 +38,7 @@ struct GoalEditorView: View {
                     }
                 }
                 TextField("Description", text: $goalDescription, axis: .vertical)
-                    .lineLimit(3, reservesSpace: true)
+                    .lineLimit(3...)
             }
 
             if let errorMessage {
@@ -40,6 +49,7 @@ struct GoalEditorView: View {
             }
         }
         .scrollContentBackground(.hidden)
+        .scrollDismissesKeyboard(.interactively)
         .background(ForesightTheme.background)
         .navigationTitle(goal == nil ? "Add Goal" : "Edit Goal")
         .navigationBarTitleDisplayMode(.inline)
@@ -51,6 +61,12 @@ struct GoalEditorView: View {
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save", action: save)
+            }
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    focusedField = nil
+                }
             }
         }
         .onAppear(perform: loadDraft)
