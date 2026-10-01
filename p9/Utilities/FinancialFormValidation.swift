@@ -1,0 +1,20 @@
+import Foundation
+
+enum FinancialFormValidation {
+    static func cleanName(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func optionalDescription(_ value: String) -> String? {
+        let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    static func validateGoalName(_ value: String) -> String? {
+        cleanName(value).isEmpty ? "Name is required." : nil
+    }
+
+    static func validateGoalTarget(_ minorUnits: Int64) -> String? {
+        minorUnits > 0 ? nil : "Goal target must be greater than zero."
+    }
+}
