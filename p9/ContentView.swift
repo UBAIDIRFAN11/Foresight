@@ -81,5 +81,5 @@ private enum LoadState {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [FinancialProfile.self, FinancialGoal.self], inMemory: true)
+        .modelContainer(for: [FinancialProfile.self, FinancialGoal.self, SavedDecision.self], inMemory: true)
 }

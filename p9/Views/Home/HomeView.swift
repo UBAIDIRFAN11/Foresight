@@ -4,8 +4,9 @@ import SwiftData
 struct HomeView: View {
     @Bindable var profile: FinancialProfile
     let duplicateProfileCount: Int
-    let onEvaluatePurchase: () -> Void
+    let onEvaluatePurchase: (UUID?) -> Void
     @Query(sort: [SortDescriptor(\FinancialGoal.targetDate), SortDescriptor(\FinancialGoal.createdAt)]) private var goals: [FinancialGoal]
+    @Query(sort: [SortDescriptor(\SavedDecision.savedAt, order: .reverse)]) private var savedDecisions: [SavedDecision]
     @State private var focusedGoalID: UUID?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -46,7 +47,7 @@ struct HomeView: View {
                 }
 
                 Button {
-                    onEvaluatePurchase()
+                    onEvaluatePurchase(focusedGoal?.id)
                 } label: {
                     Label("Evaluate a Purchase", systemImage: "chevron.right")
                         .font(.headline)
@@ -58,9 +59,24 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Recent Decisions")
                         .font(.headline)
-                    Text("To be implemented.")
-                        .foregroundStyle(.secondary)
-                        .foresightCard()
+                    if let latestDecision = savedDecisions.first {
+                        NavigationLink {
+                            PurchaseImpactView(
+                                evaluation: latestDecision.evaluationSnapshot,
+                                mode: .saved(savedAt: latestDecision.savedAt),
+                                onSaved: nil,
+                                onAdjust: nil
+                            )
+                        } label: {
+                            recentDecisionRow(latestDecision)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text("Saved purchase decisions will appear here after you calculate and save an impact.")
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .foresightCard()
+                    }
                 }
             }
             .foresightReadableContent()
@@ -148,6 +164,37 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .foresightCard()
+    }
+
+    private func recentDecisionRow(_ decision: SavedDecision) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(decision.purchaseName)
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            AdaptiveValueRow(
+                title: decision.goalName,
+                value: MoneyFormatting.display(decision.purchaseAmountMinor, currencyCode: decision.currencyCode)
+            )
+            Text(decisionImpactText(decision))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foresightCard()
+    }
+
+    private func decisionImpactText(_ decision: SavedDecision) -> String {
+        let snapshot = decision.evaluationSnapshot
+        if let months = snapshot.result.purchaseDelay.monthCount {
+            return months == 0 ? "No completion delay." : "Completion delayed by \(months) \(months == 1 ? "month" : "months")."
+        }
+        return "Impact estimate saved with unavailable completion delay."
     }
 }
 

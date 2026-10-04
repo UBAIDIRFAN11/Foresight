@@ -12,6 +12,7 @@ struct MainTabView: View {
     @Bindable var profile: FinancialProfile
     let duplicateProfileCount: Int
     @State private var selectedTab: AppTab = .home
+    @State private var simulatorGoalID: UUID?
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -19,7 +20,8 @@ struct MainTabView: View {
                 HomeView(
                     profile: profile,
                     duplicateProfileCount: duplicateProfileCount,
-                    onEvaluatePurchase: {
+                    onEvaluatePurchase: { goalID in
+                        simulatorGoalID = goalID
                         selectedTab = .simulator
                     }
                 )
@@ -38,7 +40,9 @@ struct MainTabView: View {
             .tag(AppTab.goals)
 
             NavigationStack {
-                SimulatorView(profile: profile)
+                SimulatorView(profile: profile, initialGoalID: simulatorGoalID) { _ in
+                    selectedTab = .history
+                }
             }
             .tabItem {
                 Label("Simulator", systemImage: "briefcase")

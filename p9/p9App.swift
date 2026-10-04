@@ -14,7 +14,7 @@ struct p9App: App {
 
     init() {
         do {
-            let schema = Schema([FinancialProfile.self, FinancialGoal.self])
+            let schema = Schema([FinancialProfile.self, FinancialGoal.self, SavedDecision.self])
             let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
             modelContainer = try ModelContainer(for: schema, configurations: [configuration])
             modelContainer.mainContext.autosaveEnabled = false
