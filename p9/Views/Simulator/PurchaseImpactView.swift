@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct PurchaseImpactView: View {
+    // Live results can be saved or adjusted. Saved results are read-only snapshots.
     enum Mode: Equatable {
         case live(isStale: Bool, staleMessage: String?)
         case saved(savedAt: Date)
@@ -26,6 +27,7 @@ struct PurchaseImpactView: View {
                 impactRows
 
                 if case .live(let isStale, let message) = mode, isStale {
+                    // Stale live results are still visible, but cannot be saved.
                     Label(message ?? "This result is out of date. Recalculate before saving.", systemImage: "exclamationmark.triangle")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(ForesightTheme.warning)
@@ -119,6 +121,7 @@ struct PurchaseImpactView: View {
     private var actions: some View {
         switch mode {
         case .saved:
+            // History/Home presentations are read-only.
             EmptyView()
         case .live(let isStale, _):
             Button {
@@ -146,6 +149,7 @@ struct PurchaseImpactView: View {
     }
 
     private var consequenceTitle: String {
+        // The headline summarizes the main consequence before the detailed rows.
         if evaluation.result.afterPurchase.deadlineBalanceMinor < evaluation.goalTargetMinor {
             return "Deadline Missed"
         }
@@ -181,6 +185,7 @@ struct PurchaseImpactView: View {
 
     private func save() {
         do {
+            // SavedDecisionStore handles duplicate prevention and rollback.
             let decision = try SavedDecisionStore.save(evaluation, in: modelContext)
             savedDecision = decision
             saveError = nil
@@ -191,6 +196,7 @@ struct PurchaseImpactView: View {
     }
 
     private func completionText(_ projection: GoalCompletionProjection) -> String {
+        // Completion text explains finite projections and unavailable cases.
         switch projection {
         case .completedNow:
             "Completed now"

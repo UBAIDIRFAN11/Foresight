@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct HistoryView: View {
+    // Newest saved decisions appear first in the history list.
     @Query(sort: [SortDescriptor(\SavedDecision.savedAt, order: .reverse)]) private var decisions: [SavedDecision]
 
     var body: some View {
@@ -28,6 +29,7 @@ struct HistoryView: View {
                                 .font(.headline)
                             ForEach(group.decisions) { decision in
                                 NavigationLink {
+                                    // Open the saved snapshot, not a recalculation.
                                     PurchaseImpactView(
                                         evaluation: decision.evaluationSnapshot,
                                         mode: .saved(savedAt: decision.savedAt),
@@ -49,6 +51,7 @@ struct HistoryView: View {
     }
 
     private var groupedDecisions: [(month: String, decisions: [SavedDecision])] {
+        // Group rows under month headings while keeping newest groups first.
         Dictionary(grouping: decisions) { decision in
             decision.savedAt.formatted(.dateTime.month(.wide).year())
         }
@@ -86,6 +89,7 @@ struct HistoryView: View {
     }
 
     private func impactText(_ decision: SavedDecision) -> String {
+        // Compact row summary; the detail screen shows the full calculation.
         let snapshot = decision.evaluationSnapshot
         if snapshot.result.afterPurchase.deadlineBalanceMinor < snapshot.goalTargetMinor {
             return "Deadline missed after purchase."

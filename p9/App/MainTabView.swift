@@ -1,5 +1,7 @@
 import SwiftUI
 
+//This file's job is to decide which major section of the app the user is looking at, provide the bottom tab bar, and coordinate movement between those sections.
+
 struct MainTabView: View {
     private enum AppTab {
         case home
@@ -9,9 +11,11 @@ struct MainTabView: View {
         case settings
     }
 
+    //financial profile is passed into the whole app, as several parts of the app need access to it.
     @Bindable var profile: FinancialProfile
     let duplicateProfileCount: Int
     @State private var selectedTab: AppTab = .home
+    // When Home opens the simulator, this carries the focused goal across tabs.
     @State private var simulatorGoalID: UUID?
 
     var body: some View {
@@ -21,6 +25,7 @@ struct MainTabView: View {
                     profile: profile,
                     duplicateProfileCount: duplicateProfileCount,
                     onEvaluatePurchase: { goalID in
+                        //jump straight to Simulator with Home's focused goal selected.
                         simulatorGoalID = goalID
                         selectedTab = .simulator
                     }
@@ -41,6 +46,7 @@ struct MainTabView: View {
 
             NavigationStack {
                 SimulatorView(profile: profile, initialGoalID: simulatorGoalID) { _ in
+                    //successful save should take the user to their saved history.
                     selectedTab = .history
                 }
             }

@@ -22,6 +22,8 @@ nonisolated enum MoneyParseError: LocalizedError, Equatable {
 
 nonisolated enum MoneyFormatting {
     static func parseMinorUnits(_ text: String, currency: CurrencyDefinition) throws -> Int64 {
+        // Keep input strict so "$1,000" is not accidentally parsed differently
+        // across locales. Users enter plain digits and an optional decimal point.
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw MoneyParseError.empty }
         guard !trimmed.contains("-") else { throw MoneyParseError.negative }
@@ -35,6 +37,7 @@ nonisolated enum MoneyFormatting {
         let fraction = parts.count == 2 ? String(parts[1]) : ""
         guard fraction.count <= currency.minorUnitScale else { throw MoneyParseError.excessivePrecision }
 
+        // Convert major units into minor units, e.g. "12.34" AUD -> 1234 cents.
         let scale = pow10(currency.minorUnitScale)
         let wholeResult = whole.multipliedReportingOverflow(by: scale)
         guard !wholeResult.overflow else { throw MoneyParseError.overflow }
@@ -47,6 +50,7 @@ nonisolated enum MoneyFormatting {
     }
 
     static func display(_ minorUnits: Int64, currencyCode: String, includeCode: Bool = false) -> String {
+        // Use the currency's locale for display only. Calculations stay in Int64 minor units.
         let currency = CurrencyDefinition.definition(for: currencyCode)
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
@@ -62,6 +66,7 @@ nonisolated enum MoneyFormatting {
     }
 
     static func editableText(_ minorUnits: Int64, currencyCode: String) -> String {
+        // Convert stored minor units back into plain editable text for form fields.
         let currency = CurrencyDefinition.definition(for: currencyCode)
         if currency.minorUnitScale == 0 {
             return String(minorUnits)

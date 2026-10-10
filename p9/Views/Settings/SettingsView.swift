@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Bindable var profile: FinancialProfile
 
     var body: some View {
+        // Settings links to profile editing plus placeholder/info screens.
         List {
             Section {
                 NavigationLink {

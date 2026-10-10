@@ -1,14 +1,20 @@
 import Foundation
 
+//This file defines the datatypes used by the financial calculation engine
+
+//inputs are stored in minor units, such as cents for AUD, to keep financial calculations exact and avoid FP rounding.
+
+//bundles together everything the calculator needs to evaluate a financial goal.
 nonisolated struct FinancialInputs: Equatable, Sendable {
     let savingsMinor: Int64
     let incomeMinor: Int64
     let expensesMinor: Int64
     let targetMinor: Int64
-    let evaluationDate: Date
-    let targetDate: Date
+    let evaluationDate: Date //the date we calculate from
+    let targetDate: Date //the date corresponding to the goal's deadline
 }
 
+//describes what state the user's goal is currently in.
 nonisolated enum GoalFundingStatus: Equatable, Sendable {
     case fundedNow
     case onTrack(completionDate: Date, deadlineBalanceMinor: Int64, monthsToDeadline: Int)
@@ -21,10 +27,11 @@ nonisolated enum GoalFundingStatus: Equatable, Sendable {
     case completionBeyondLimit
 }
 
+// The general result used by goal cards, goal details, and purchase simulations.
 nonisolated struct FinancialCalculationResult: Equatable, Sendable {
-    let monthlyCapacityMinor: Int64
-    let remainingMinor: Int64
-    let progress: Double
+    let monthlyCapacityMinor: Int64 //how much user saves per month (income - expenses)
+    let remainingMinor: Int64 //how much more $ required to reach the goal (target - current savings)
+    let progress: Double //%completed (0-100%)
     let monthlyRequiredMinor: Int64
     let deadlineBalanceMinor: Int64
     let monthsToDeadline: Int
@@ -32,6 +39,8 @@ nonisolated struct FinancialCalculationResult: Equatable, Sendable {
     let completionProjection: GoalCompletionProjection
 }
 
+// Completion projection is separate from deadline status:
+// a goal can finish eventually but still miss its deadline.
 nonisolated enum GoalCompletionProjection: Equatable, Sendable {
     case completedNow
     case projected(months: Int, date: Date)
@@ -39,6 +48,7 @@ nonisolated enum GoalCompletionProjection: Equatable, Sendable {
     case beyondLimit
 }
 
+// Purchase impact wraps normal financial inputs plus the hypothetical purchase.
 nonisolated struct PurchaseImpactInputs: Equatable, Sendable {
     let financialInputs: FinancialInputs
     let purchaseAmountMinor: Int64
@@ -60,6 +70,8 @@ nonisolated enum PurchaseImpactError: LocalizedError, Equatable, Sendable {
     }
 }
 
+// Some impact values are not always calculable. This enum explains why,
+// instead of using a fake zero or empty string.
 nonisolated enum PurchaseImpactUnavailableReason: String, Equatable, Sendable {
     case currentPlanAlreadyMissesDeadline
     case pastDeadline
@@ -70,6 +82,7 @@ nonisolated enum PurchaseImpactUnavailableReason: String, Equatable, Sendable {
     case notNeeded
 }
 
+// A purchase impact metric can be money, months, or unavailable with a reason.
 nonisolated enum PurchaseImpactMetric: Equatable, Sendable {
     case amount(Int64)
     case months(Int)
@@ -84,6 +97,7 @@ nonisolated enum PurchaseImpactMetric: Equatable, Sendable {
     }
 }
 
+// Full before/after purchase result shown by PurchaseImpactView and saved to History.
 nonisolated struct PurchaseImpactResult: Equatable, Sendable {
     let baseline: FinancialCalculationResult
     let afterPurchase: FinancialCalculationResult

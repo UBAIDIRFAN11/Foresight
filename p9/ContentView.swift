@@ -13,13 +13,18 @@ struct ContentView: View {
     @State private var loadState: LoadState = .loading
 
     var body: some View {
+        //ContentView decides whether the app should show onboarding,
+        // the main tabs, or a loading/error state.
         Group {
+            
+            //if data is loading, show loading state
             switch loadState {
             case .loading:
                 ProgressView("Loading Foresight")
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(ForesightTheme.background)
+            //if loading fails, show error/retry screen
             case .failed(let message):
                 ScrollView {
                     VStack(spacing: 16) {
@@ -45,10 +50,14 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ForesightTheme.background)
+                
+            //if no profile exists, show onboarding screen
             case .needsProfile:
                 FinancialProfileView(mode: .onboarding) { profile in
                     loadState = .ready(profile: profile, duplicateCount: 0)
                 }
+                
+            //if profile already exists, open maintabview
             case .ready(let profile, let duplicateCount):
                 MainTabView(profile: profile, duplicateProfileCount: duplicateCount)
             }
@@ -61,6 +70,8 @@ struct ContentView: View {
     private func loadProfile() {
         do {
             let profiles = try FinancialProfilePolicy.fetchProfiles(in: modelContext)
+            // The app uses one selected profile. If duplicates exist, they are preserved
+            // but the earliest profile is used for the main experience.
             if let selected = FinancialProfilePolicy.selectedProfile(from: profiles) {
                 loadState = .ready(profile: selected, duplicateCount: max(profiles.count - 1, 0))
             } else {

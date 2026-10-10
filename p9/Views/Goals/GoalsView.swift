@@ -21,6 +21,7 @@ struct GoalsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 if dynamicTypeSize.isAccessibilitySize {
+                    // Segmented controls get crowded at large text sizes, so use a menu.
                     Menu {
                         Picker("Filter", selection: $filter) {
                             ForEach(GoalFilter.allCases) { option in
@@ -93,6 +94,7 @@ struct GoalsView: View {
     }
 
     private var filteredGoals: [FinancialGoal] {
+        // Filtering is based on the live calculation for each goal.
         sortedGoals.filter { goal in
             switch filter {
             case .all:
@@ -114,6 +116,7 @@ struct GoalsView: View {
     }
 
     private func isOnTrack(_ goal: FinancialGoal) -> Bool {
+        // The goal list uses the same calculator as the goal card/detail screens.
         let result = FinancialCalculator.evaluate(
             FinancialInputs(
                 savingsMinor: profile.currentSavingsMinor,

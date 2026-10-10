@@ -144,6 +144,8 @@ struct FinancialProfileView: View {
     }
 
     private var isCurrencyLocked: Bool {
+        // Goals are stored in the selected currency. Lock currency while goals exist
+        // so old goal amounts are not silently reinterpreted.
         if case .editing(let profile) = mode, profile.preferredCurrencyCode != currencyCode {
             return !goals.isEmpty
         }
@@ -154,6 +156,7 @@ struct FinancialProfileView: View {
     }
 
     private var savingsSummary: some View {
+        // This live preview helps users see monthly capacity before saving.
         let capacity = parsed(monthlyIncome, fallback: 0) - parsed(recurringExpenses, fallback: 0)
         return VStack(alignment: .leading, spacing: 8) {
             Text("Estimated Monthly Savings")
@@ -187,6 +190,7 @@ struct FinancialProfileView: View {
     }
 
     private func moneyField(title: String, icon: String, text: Binding<String>) -> some View {
+        // Money rows stack vertically at large text sizes.
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
             : AnyLayout(HStackLayout(alignment: .center, spacing: 14))
@@ -221,6 +225,7 @@ struct FinancialProfileView: View {
     }
 
     private func loadDraftIfNeeded() {
+        // Editing loads existing profile values once; onboarding starts empty.
         guard !hasLoadedDraft else { return }
         hasLoadedDraft = true
         if case .editing(let profile) = mode {
@@ -232,11 +237,13 @@ struct FinancialProfileView: View {
     }
 
     private func parsed(_ text: String, fallback: Int64) -> Int64 {
+        // The summary should keep rendering while the user is halfway through typing.
         (try? MoneyFormatting.parseMinorUnits(text, currency: selectedCurrency)) ?? fallback
     }
 
     private func save() {
         do {
+            // Guard again at save time in case goals appeared while this screen was open.
             if case .editing(let profile) = mode, profile.preferredCurrencyCode != currencyCode, !goals.isEmpty {
                 errorMessage = "Remove all goals before changing currency."
                 return
@@ -247,6 +254,7 @@ struct FinancialProfileView: View {
 
             switch mode {
             case .onboarding:
+                // Onboarding creates the first profile if one still does not exist.
                 let profile = FinancialProfile(
                     currentSavingsMinor: savings,
                     monthlyIncomeMinor: income,
@@ -256,6 +264,7 @@ struct FinancialProfileView: View {
                 let saved = try FinancialProfilePolicy.createProfileIfStillMissing(profile, in: modelContext)
                 onProfileSaved?(saved)
             case .editing(let profile):
+                // Editing updates the selected profile in place.
                 profile.currentSavingsMinor = savings
                 profile.monthlyIncomeMinor = income
                 profile.recurringExpensesMinor = expenses
@@ -264,6 +273,7 @@ struct FinancialProfileView: View {
                 dismiss()
             }
         } catch {
+            // Keep the edit screen open and show the error if saving fails.
             modelContext.rollback()
             errorMessage = error.localizedDescription
         }

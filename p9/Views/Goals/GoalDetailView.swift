@@ -13,6 +13,7 @@ struct GoalDetailView: View {
     private let today = Date()
 
     init(goalID: UUID, profile: FinancialProfile) {
+        // Query only the selected goal so edits/deletes update this view automatically.
         _goals = Query(filter: #Predicate<FinancialGoal> { goal in
             goal.id == goalID
         })
@@ -27,7 +28,7 @@ struct GoalDetailView: View {
                         Text(goal.name)
                             .font(.largeTitle.weight(.bold))
                             .fixedSize(horizontal: false, vertical: true)
-                        GoalCard(goal: goal, profile: profile, today: today)
+                        GoalCard(goal: goal, profile: profile, today: today, showsNavigationIndicator: false)
                         detailRows(for: goal)
                         deleteButton
                         if let errorMessage {
@@ -69,6 +70,7 @@ struct GoalDetailView: View {
     }
 
     private func detailRows(for goal: FinancialGoal) -> some View {
+        // Detail rows show the current profile's effect on this goal right now.
         let result = FinancialCalculator.evaluate(
             FinancialInputs(
                 savingsMinor: profile.currentSavingsMinor,
@@ -108,6 +110,7 @@ struct GoalDetailView: View {
             try modelContext.save()
             dismiss()
         } catch {
+            // Roll back so a failed delete does not leave the context half-changed.
             modelContext.rollback()
             errorMessage = error.localizedDescription
         }

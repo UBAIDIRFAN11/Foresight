@@ -1,9 +1,13 @@
 import Foundation
 
+//calculates whether a goal is on-track.
+
 nonisolated enum FinancialCalculator {
     static let completionMonthLimit = 1_200
 
     static func evaluate(_ inputs: FinancialInputs) -> FinancialCalculationResult {
+        
+        //monthly capacity = income - expenses
         let capacityResult = inputs.incomeMinor.subtractingReportingOverflow(inputs.expensesMinor)
         guard !capacityResult.overflow else {
             return invalidResult(capacity: 0)
@@ -16,15 +20,27 @@ nonisolated enum FinancialCalculator {
 
         let evaluationDate = FinancialCalendar.utcNoon(for: inputs.evaluationDate, in: FinancialCalendar.gregorianUTC)
         let targetDate = FinancialCalendar.utcNoon(for: inputs.targetDate, in: FinancialCalendar.gregorianUTC)
+        
+        //remaining = target − current savings
         let targetRemaining = inputs.targetMinor.subtractingReportingOverflow(inputs.savingsMinor)
         guard !targetRemaining.overflow else {
             return invalidResult(capacity: capacity)
         }
         let remaining = max(targetRemaining.partialValue, 0)
+        
+        // calculate progress: i.e. how much of the goal is already funded
         let progress = min(Double(inputs.savingsMinor) / Double(inputs.targetMinor), 1.0)
+        
+        //calculate how many months left until deadline date (from current date)
         let monthsToDeadline = FinancialCalendar.monthsWithDeposits(from: evaluationDate, through: targetDate)
+        
+        //monthlyRequired = how much must be saved each month
         let monthlyRequired = ceilDivision(remaining, by: Int64(max(monthsToDeadline, 1)))
+        
+        //deadlineBalance = projected savings by the deadline
         let deadlineBalance = balance(startingMinor: inputs.savingsMinor, monthlyCapacityMinor: capacity, months: monthsToDeadline)
+        
+        //completionProjection = when the goal will actually be reached
         let projection = completionProjection(startingMinor: inputs.savingsMinor, targetMinor: inputs.targetMinor, capacityMinor: capacity, evaluationDate: evaluationDate)
 
         guard let deadlineBalance else {
@@ -53,6 +69,7 @@ nonisolated enum FinancialCalculator {
             )
         }
 
+        //determine state: e.g. if goal is ontrack, at risk,
         let status: GoalFundingStatus
         if remaining == 0 {
             status = deadlineBalance >= inputs.targetMinor
@@ -84,6 +101,7 @@ nonisolated enum FinancialCalculator {
 
     static func balance(startingMinor: Int64, monthlyCapacityMinor: Int64, months: Int) -> Int64? {
         guard months >= 0 else { return nil }
+        // Return nil instead of wrapping if the projected balance is too large.
         let monthly = monthlyCapacityMinor.multipliedReportingOverflow(by: Int64(months))
         guard !monthly.overflow else { return nil }
         let total = startingMinor.addingReportingOverflow(monthly.partialValue)
@@ -102,12 +120,14 @@ nonisolated enum FinancialCalculator {
         guard remainingMinor > 0 else { return .completedNow }
         guard capacityMinor > 0 else { return .noPositiveSavingsCapacity }
         let months = ceilDivision(remainingMinor, by: capacityMinor)
+        // Keep long projections bounded so the UI does not imply certainty forever.
         guard months <= completionMonthLimit else { return .beyondLimit }
         return .projected(months: Int(months), date: FinancialCalendar.clampedAnniversary(from: evaluationDate, addingMonths: Int(months)))
     }
 
     static func ceilDivision(_ numerator: Int64, by denominator: Int64) -> Int64 {
         guard numerator > 0, denominator > 0 else { return 0 }
+        // Quotient/remainder avoids the overflow risk of numerator + denominator - 1.
         let quotient = numerator / denominator
         let remainder = numerator % denominator
         guard remainder > 0 else { return quotient }

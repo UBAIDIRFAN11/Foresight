@@ -4,11 +4,20 @@ struct GoalCard: View {
     let goal: FinancialGoal
     let profile: FinancialProfile
     let today: Date
+    let showsNavigationIndicator: Bool
+
+    init(goal: FinancialGoal, profile: FinancialProfile, today: Date, showsNavigationIndicator: Bool = true) {
+        self.goal = goal
+        self.profile = profile
+        self.today = today
+        self.showsNavigationIndicator = showsNavigationIndicator
+    }
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .title) private var iconSize = 82
 
     private var result: FinancialCalculationResult {
+        // Goal cards always show the latest calculation from the current profile.
         FinancialCalculator.evaluate(
             FinancialInputs(
                 savingsMinor: profile.currentSavingsMinor,
@@ -23,6 +32,7 @@ struct GoalCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // At accessibility text sizes the card stacks vertically for readability.
             let layout = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
                 : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
@@ -43,9 +53,11 @@ struct GoalCard: View {
                             .font(.title3.weight(.bold))
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 8)
-                        Image(systemName: "chevron.right")
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                        if showsNavigationIndicator {
+                            Image(systemName: "chevron.right")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     if let goalDescription = goal.goalDescription {
                         Text(goalDescription)
@@ -62,6 +74,7 @@ struct GoalCard: View {
             }
 
             ViewThatFits(in: .horizontal) {
+                // Date and status sit together when there is room, otherwise stack.
                 HStack(alignment: .firstTextBaseline) {
                     Label(formattedTargetDate, systemImage: "calendar")
                     Spacer(minLength: 12)

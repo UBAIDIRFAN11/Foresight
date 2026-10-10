@@ -25,6 +25,8 @@ nonisolated enum FinancialCalendar {
         return utcNoon(year: local.year!, month: local.month!, day: local.day!)
     }
 
+    // Capture the user's local calendar day once, then store it as UTC noon.
+    // This keeps calculations consistent across time zones and daylight saving changes.
     static func localEvaluationDay(for date: Date = Date(), calendar: Calendar = .current) -> Date {
         utcNoon(for: date, in: calendar)
     }
@@ -51,6 +53,7 @@ nonisolated enum FinancialCalendar {
     }
 
     static func clampedAnniversary(from date: Date, addingMonths months: Int) -> Date {
+        // Month-end dates stay month-end where possible, e.g. Jan 31 -> Feb 28/29.
         let components = civilComponents(date)
         let baseDay = components.day!
         var target = DateComponents()

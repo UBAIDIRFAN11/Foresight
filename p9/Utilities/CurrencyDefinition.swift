@@ -8,6 +8,8 @@ nonisolated struct CurrencyDefinition: Identifiable, Hashable, Sendable {
 
     var id: String { code }
 
+    // minorUnitScale controls the number of decimal places accepted and displayed.
+    // JPY intentionally uses zero decimal places.
     static let supported: [CurrencyDefinition] = [
         .init(code: "AUD", name: "Australian Dollar", minorUnitScale: 2, localeIdentifier: "en_AU"),
         .init(code: "USD", name: "US Dollar", minorUnitScale: 2, localeIdentifier: "en_US"),

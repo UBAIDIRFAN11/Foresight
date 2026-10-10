@@ -2,6 +2,7 @@ import Foundation
 
 enum FinancialFormValidation {
     static func cleanName(_ value: String) -> String {
+        // Names are saved without accidental leading/trailing whitespace.
         value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

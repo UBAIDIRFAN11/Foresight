@@ -1,5 +1,6 @@
 import SwiftUI
 
+// Central place for app colours and repeated layout styles.
 enum ForesightTheme {
     static let background = Color("ForesightBackground")
     static let surface = Color("ForesightSurface")
@@ -45,6 +46,7 @@ struct ForesightReadableContentModifier: ViewModifier {
     let maxWidth: CGFloat
 
     func body(content: Content) -> some View {
+        // Keep wide iPad/window layouts readable instead of stretching content.
         content
             .frame(maxWidth: maxWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
@@ -68,6 +70,7 @@ struct AdaptiveValueRow: View {
     let value: String
 
     var body: some View {
+        // Try a compact horizontal row first, then stack vertically when text is large.
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline) {
                 titleText

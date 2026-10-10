@@ -1,6 +1,12 @@
 import Foundation
 import SwiftData
 
+//stores user's main financial situation:
+// -curr savings
+// -monthly income
+// -recurring expenses
+// -perferred currency
+
 @Model
 final class FinancialProfile {
     @Attribute(.unique) var id: UUID

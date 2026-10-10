@@ -3,6 +3,8 @@ import SwiftData
 
 @Model
 final class SavedDecision {
+    //saved decisions are flat snapshots. They intentionally copy goal/profile
+    // values so History remains readable after later edits or deletion.
     @Attribute(.unique) var evaluationID: UUID
     var savedAt: Date
     var purchaseName: String
@@ -35,6 +37,7 @@ final class SavedDecision {
     var afterStatus: String
 
     init(evaluation: PurchaseImpactEvaluation, savedAt: Date = Date()) {
+        // Copy every value the result screen needs at save time.
         self.evaluationID = evaluation.id
         self.savedAt = savedAt
         self.purchaseName = evaluation.purchaseName
@@ -68,6 +71,8 @@ final class SavedDecision {
     }
 }
 
+// In-memory version of a purchase impact. Simulator creates this first;
+// saving converts it into a SwiftData SavedDecision.
 struct PurchaseImpactEvaluation: Identifiable, Equatable {
     let id: UUID
     let purchaseName: String
@@ -86,6 +91,8 @@ struct PurchaseImpactEvaluation: Identifiable, Equatable {
 
 extension SavedDecision {
     var evaluationSnapshot: PurchaseImpactEvaluation {
+        // Rebuild a display-ready result from stored snapshot fields.
+        // This does not recalculate using the current profile or current goal.
         let baseline = FinancialCalculationResult(
             monthlyCapacityMinor: originalIncomeMinor - originalExpensesMinor,
             remainingMinor: max(goalTargetMinor - originalSavingsMinor, 0),
@@ -135,6 +142,8 @@ extension SavedDecision {
 }
 
 extension GoalCompletionProjection {
+    //SwiftData cannot directly store enum associated values here, so the
+    // projection is stored as simple kind/month/date fields.
     var storageKind: String {
         switch self {
         case .completedNow: "completedNow"
@@ -167,6 +176,7 @@ extension GoalCompletionProjection {
 }
 
 extension PurchaseImpactMetric {
+    // Same idea as completion projections: store rich enum values as flat fields.
     var storageKind: String {
         switch self {
         case .amount: "amount"
@@ -196,6 +206,7 @@ extension PurchaseImpactMetric {
 }
 
 extension GoalFundingStatus {
+    // Human-readable status labels captured with the saved snapshot.
     var summaryTitle: String {
         switch self {
         case .fundedNow:

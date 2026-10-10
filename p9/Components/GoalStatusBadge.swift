@@ -4,6 +4,7 @@ struct GoalStatusBadge: View {
     let result: FinancialCalculationResult
 
     var body: some View {
+        // A compact summary of the richer GoalFundingStatus value.
         Label(title, systemImage: icon)
             .font(.caption.weight(.semibold))
             .foregroundStyle(color)

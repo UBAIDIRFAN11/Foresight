@@ -14,6 +14,8 @@ enum FinancialProfilePolicy {
     }
 
     static func selectedProfile(from profiles: [FinancialProfile]) -> FinancialProfile? {
+        // If duplicate profiles exist, choose deterministically so app startup
+        // always lands on the same profile.
         profiles.sorted {
             if $0.createdAt == $1.createdAt {
                 return $0.id.uuidString < $1.id.uuidString
@@ -32,6 +34,7 @@ enum FinancialProfilePolicy {
             try context.save()
             return profile
         } catch {
+            // Keep the context clean if creating the profile fails.
             context.rollback()
             throw error
         }

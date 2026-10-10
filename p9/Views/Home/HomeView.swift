@@ -4,6 +4,7 @@ import SwiftData
 struct HomeView: View {
     @Bindable var profile: FinancialProfile
     let duplicateProfileCount: Int
+    // Home does not own Simulator navigation; it asks MainTabView to switch tabs.
     let onEvaluatePurchase: (UUID?) -> Void
     @Query(sort: [SortDescriptor(\FinancialGoal.targetDate), SortDescriptor(\FinancialGoal.createdAt)]) private var goals: [FinancialGoal]
     @Query(sort: [SortDescriptor(\SavedDecision.savedAt, order: .reverse)]) private var savedDecisions: [SavedDecision]
@@ -47,6 +48,7 @@ struct HomeView: View {
                 }
 
                 Button {
+                    // Pass the current focus so Simulator starts on the same goal.
                     onEvaluatePurchase(focusedGoal?.id)
                 } label: {
                     Label("Evaluate a Purchase", systemImage: "chevron.right")
@@ -60,6 +62,7 @@ struct HomeView: View {
                     Text("Recent Decisions")
                         .font(.headline)
                     if let latestDecision = savedDecisions.first {
+                        // Recent Decisions reuses the same read-only result view as History.
                         NavigationLink {
                             PurchaseImpactView(
                                 evaluation: latestDecision.evaluationSnapshot,
@@ -148,6 +151,7 @@ struct HomeView: View {
     }
 
     private var focusedGoal: FinancialGoal? {
+        // If the stored focus was deleted, fall back to the first sorted goal.
         if let focusedGoalID, let goal = sortedGoals.first(where: { $0.id == focusedGoalID }) {
             return goal
         }
@@ -199,6 +203,7 @@ struct HomeView: View {
 }
 
 func goalSort(_ lhs: FinancialGoal, _ rhs: FinancialGoal) -> Bool {
+    // Shared goal ordering: priority first, then deadline, then creation date.
     if lhs.priorityRawValue != rhs.priorityRawValue {
         return lhs.priorityRawValue > rhs.priorityRawValue
     }

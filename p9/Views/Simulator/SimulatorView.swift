@@ -4,6 +4,7 @@ import SwiftData
 struct SimulatorView: View {
     @Bindable var profile: FinancialProfile
     let initialGoalID: UUID?
+    // MainTabView uses this callback to switch to History after a successful save.
     let onSaved: (SavedDecision) -> Void
 
     @Query private var goals: [FinancialGoal]
@@ -11,6 +12,7 @@ struct SimulatorView: View {
     @State private var purchaseName = ""
     @State private var amount = ""
     @State private var errorMessage: String?
+    // The current unsaved calculation result, if the user has calculated one.
     @State private var evaluation: PurchaseImpactEvaluation?
     @State private var isShowingResult = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -45,6 +47,7 @@ struct SimulatorView: View {
                     )
                     .frame(maxWidth: .infinity)
                 } else {
+                    // Goal selection is kept stable even if goals are added or deleted.
                     Picker("Goal", selection: $selectedGoalID) {
                         ForEach(sortedGoals) { goal in
                             Text(goal.name).tag(Optional(goal.id))
@@ -127,6 +130,7 @@ struct SimulatorView: View {
         .background(ForesightTheme.background)
         .navigationDestination(isPresented: $isShowingResult) {
             if let evaluation {
+                // Check freshness right before presenting/saving the result.
                 let stale = staleState(for: evaluation)
                 PurchaseImpactView(
                     evaluation: evaluation,
@@ -161,6 +165,8 @@ struct SimulatorView: View {
     }
 
     private var previewAmount: Int64? {
+        // A valid amount gets previewed before calculation; invalid text simply
+        // waits for the Calculate button to show a validation message.
         try? MoneyFormatting.parseMinorUnits(amount, currency: CurrencyDefinition.definition(for: profile.preferredCurrencyCode))
     }
 
@@ -169,6 +175,7 @@ struct SimulatorView: View {
     }
 
     private func reconcileSelection(preferredID: UUID?) {
+        // Preserve a valid selection. Otherwise choose the first sorted goal.
         let ids = Set(sortedGoals.map(\.id))
         if let preferredID, ids.contains(preferredID) {
             selectedGoalID = preferredID
@@ -181,6 +188,8 @@ struct SimulatorView: View {
 
     private func calculateImpact() {
         focusedField = nil
+        // Simulator validates UI input first, then hands clean values to the
+        // domain calculator.
         let cleanedName = FinancialFormValidation.cleanName(purchaseName)
         guard !cleanedName.isEmpty else {
             errorMessage = "Purchase name is required."
@@ -201,6 +210,7 @@ struct SimulatorView: View {
         }
 
         let evaluationDate = FinancialCalendar.localEvaluationDay()
+        // Build a snapshot of the current profile and selected goal values.
         let inputs = FinancialInputs(
             savingsMinor: profile.currentSavingsMinor,
             incomeMinor: profile.monthlyIncomeMinor,
@@ -212,6 +222,7 @@ struct SimulatorView: View {
 
         switch PurchaseImpactCalculator.evaluate(PurchaseImpactInputs(financialInputs: inputs, purchaseAmountMinor: purchaseMinor)) {
         case .success(let result):
+            // A new calculation gets a new ID so saving it creates a distinct decision.
             evaluation = PurchaseImpactEvaluation(
                 id: UUID(),
                 purchaseName: cleanedName,
@@ -235,6 +246,8 @@ struct SimulatorView: View {
     }
 
     private func staleState(for evaluation: PurchaseImpactEvaluation) -> (isStale: Bool, message: String?) {
+        // The user must recalculate if anything that affected the result changed
+        // before the result was saved.
         guard FinancialCalendar.localEvaluationDay() == evaluation.evaluationDate else {
             return (true, "The calendar day has changed since this calculation. Recalculate before saving.")
         }

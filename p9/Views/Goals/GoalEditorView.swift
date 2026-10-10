@@ -22,6 +22,7 @@ struct GoalEditorView: View {
     }
 
     var body: some View {
+        // Goal editing uses a native Form so date pickers and text fields behave normally.
         Form {
             Section("Goal") {
                 TextField("Name", text: $name)
@@ -73,6 +74,7 @@ struct GoalEditorView: View {
     }
 
     private func loadDraft() {
+        // Load existing goal values once when editing; new goals keep the defaults.
         guard !loaded else { return }
         loaded = true
         guard let goal else { return }
@@ -85,6 +87,7 @@ struct GoalEditorView: View {
 
     private func save() {
         do {
+            // Validate and parse before writing anything to SwiftData.
             let cleanedName = FinancialFormValidation.cleanName(name)
             if let message = FinancialFormValidation.validateGoalName(cleanedName) {
                 errorMessage = message
@@ -97,12 +100,14 @@ struct GoalEditorView: View {
             }
 
             if let goal {
+                // Editing mutates the existing SwiftData model.
                 goal.name = cleanedName
                 goal.targetAmountMinor = target
                 goal.targetDate = FinancialCalendar.utcNoon(for: targetDate)
                 goal.priority = priority
                 goal.goalDescription = FinancialFormValidation.optionalDescription(goalDescription)
             } else {
+                // Adding inserts a brand-new goal model.
                 modelContext.insert(
                     FinancialGoal(
                         name: cleanedName,
@@ -116,6 +121,7 @@ struct GoalEditorView: View {
             try modelContext.save()
             dismiss()
         } catch {
+            // Failed saves should not leave partial draft data in the context.
             modelContext.rollback()
             errorMessage = error.localizedDescription
         }

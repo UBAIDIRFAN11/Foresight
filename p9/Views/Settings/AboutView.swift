@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AboutView: View {
     private var versionText: String {
+        // Pull the app version from the generated Info.plist values.
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         return "\(version) (\(build))"
