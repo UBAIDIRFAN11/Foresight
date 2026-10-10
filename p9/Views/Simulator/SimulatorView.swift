@@ -138,6 +138,9 @@ struct SimulatorView: View {
                     onSaved: { decision in
                         onSaved(decision)
                     },
+                    onAmountChange: { newAmountMinor in
+                        updateLiveEvaluationAmount(newAmountMinor)
+                    },
                     onAdjust: {
                         isShowingResult = false
                     }
@@ -264,5 +267,41 @@ struct SimulatorView: View {
             return (true, "The profile or goal changed since this calculation. Recalculate before saving.")
         }
         return (false, nil)
+    }
+
+    private func updateLiveEvaluationAmount(_ newAmountMinor: Int64) {
+        guard let current = evaluation, newAmountMinor != current.purchaseAmountMinor else { return }
+
+        let inputs = FinancialInputs(
+            savingsMinor: current.originalSavingsMinor,
+            incomeMinor: current.originalIncomeMinor,
+            expensesMinor: current.originalExpensesMinor,
+            targetMinor: current.goalTargetMinor,
+            evaluationDate: current.evaluationDate,
+            targetDate: current.goalTargetDate
+        )
+
+        switch PurchaseImpactCalculator.evaluate(PurchaseImpactInputs(financialInputs: inputs, purchaseAmountMinor: newAmountMinor)) {
+        case .success(let result):
+            evaluation = PurchaseImpactEvaluation(
+                id: UUID(),
+                purchaseName: current.purchaseName,
+                purchaseAmountMinor: newAmountMinor,
+                currencyCode: current.currencyCode,
+                goalID: current.goalID,
+                goalName: current.goalName,
+                goalTargetMinor: current.goalTargetMinor,
+                goalTargetDate: current.goalTargetDate,
+                originalSavingsMinor: current.originalSavingsMinor,
+                originalIncomeMinor: current.originalIncomeMinor,
+                originalExpensesMinor: current.originalExpensesMinor,
+                evaluationDate: current.evaluationDate,
+                result: result
+            )
+            amount = MoneyFormatting.editableText(newAmountMinor, currencyCode: current.currencyCode)
+            errorMessage = nil
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+        }
     }
 }

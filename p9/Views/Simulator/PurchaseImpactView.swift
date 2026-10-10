@@ -11,17 +11,26 @@ struct PurchaseImpactView: View {
     let evaluation: PurchaseImpactEvaluation
     let mode: Mode
     let onSaved: ((SavedDecision) -> Void)?
+    let onAmountChange: ((Int64) -> Void)?
     let onAdjust: (() -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @State private var savedDecision: SavedDecision?
     @State private var saveError: String?
+    @State private var amountDraft = ""
+    @State private var amountError: String?
+    @State private var sliderValue = 0.0
+    @State private var isSyncingAmountDraft = false
+    @State private var visibleStartMonth = 0
+    @State private var selectedChartDate: Date?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 consequenceCard
+                liveProjectionSection
+                liveAmountControls
                 purchaseCard
                 goalCard
                 impactRows
@@ -48,6 +57,14 @@ struct PurchaseImpactView: View {
         .background(ForesightTheme.background)
         .navigationTitle("Purchase Impact")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            syncAmountDraft()
+        }
+        .onChange(of: evaluation.id) { _, _ in
+            savedDecision = nil
+            saveError = nil
+            syncAmountDraft()
+        }
     }
 
     private var header: some View {
@@ -55,7 +72,7 @@ struct PurchaseImpactView: View {
             Text(evaluation.purchaseName)
                 .font(.largeTitle.weight(.bold))
                 .fixedSize(horizontal: false, vertical: true)
-            Text("\(MoneyFormatting.display(evaluation.purchaseAmountMinor, currencyCode: evaluation.currencyCode, includeCode: true)) evaluated \(formatted(evaluation.evaluationDate))")
+            Text("Evaluated \(formatted(evaluation.evaluationDate))")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -84,11 +101,110 @@ struct PurchaseImpactView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Purchase")
                 .font(.headline)
-            AdaptiveValueRow(title: "Amount", value: MoneyFormatting.display(evaluation.purchaseAmountMinor, currencyCode: evaluation.currencyCode))
+            if case .saved = mode {
+                AdaptiveValueRow(title: "Amount", value: MoneyFormatting.display(evaluation.purchaseAmountMinor, currencyCode: evaluation.currencyCode))
+            }
             AdaptiveValueRow(title: "Remaining savings", value: MoneyFormatting.display(evaluation.result.remainingSavingsMinor, currencyCode: evaluation.currencyCode))
             AdaptiveValueRow(title: "Currency", value: evaluation.currencyCode)
         }
         .foresightCard()
+    }
+
+    @ViewBuilder
+    private var liveProjectionSection: some View {
+        if case .live = mode {
+            let projection = FinancialProjectionBuilder.build(
+                inputs: projectionInputs,
+                purchaseAmountMinor: evaluation.purchaseAmountMinor,
+                visibleStartMonth: visibleStartMonth
+            )
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Projection")
+                        .font(.headline)
+                    Spacer(minLength: 12)
+                    Text("Months \(visibleStartMonth)-\(visibleStartMonth + FinancialProjectionBuilder.defaultVisibleMonthCount)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                switch projection {
+                case .success(let projection):
+                    if let explanation = projection.explanation {
+                        Text(explanation)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    SavingsProjectionChart(
+                        projection: projection,
+                        currencyCode: evaluation.currencyCode,
+                        selectedDate: $selectedChartDate
+                    )
+                    timelineControls(for: projection)
+                case .failure(let error):
+                    Label(error.localizedDescription, systemImage: "chart.xyaxis.line")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .foresightCard()
+        }
+    }
+
+    @ViewBuilder
+    private var liveAmountControls: some View {
+        if case .live = mode {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Adjust Purchase")
+                    .font(.headline)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Exact amount")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    TextField("0", text: $amountDraft)
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: amountDraft) { _, newValue in
+                            amountDraftChanged(newValue)
+                        }
+                }
+
+                if canUseSlider {
+                    Slider(
+                        value: $sliderValue,
+                        in: 1...Double(sliderMaximumMinor),
+                        step: 1
+                    )
+                    .onChange(of: sliderValue) { _, newValue in
+                        sliderChanged(newValue)
+                    }
+                    HStack {
+                        Text(MoneyFormatting.display(1, currencyCode: evaluation.currencyCode))
+                        Spacer()
+                        Text(MoneyFormatting.display(sliderMaximumMinor, currencyCode: evaluation.currencyCode))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else {
+                    Text("Use the exact amount field for very large balances.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let amountError {
+                    Label(amountError, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(ForesightTheme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .foresightCard()
+        }
     }
 
     private var goalCard: some View {
@@ -106,11 +222,11 @@ struct PurchaseImpactView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Impact")
                 .font(.headline)
-            AdaptiveValueRow(title: "Before purchase", value: completionText(evaluation.result.baseline.completionProjection))
-            AdaptiveValueRow(title: "After purchase", value: completionText(evaluation.result.afterPurchase.completionProjection))
+            AdaptiveValueRow(title: "Before purchase", value: completionDateText(evaluation.result.baseline.completionProjection))
+            AdaptiveValueRow(title: "After purchase", value: completionDateText(evaluation.result.afterPurchase.completionProjection))
             AdaptiveValueRow(title: "Completion delay", value: metricText(evaluation.result.purchaseDelay))
             AdaptiveValueRow(title: "Extra monthly savings", value: moneyMetricText(evaluation.result.extraMonthlySavings))
-            AdaptiveValueRow(title: "Maximum purchase preserving deadline", value: moneyMetricText(evaluation.result.maximumPurchasePreservingDeadline))
+            AdaptiveValueRow(title: "Deadline-safe purchase", value: moneyMetricText(evaluation.result.maximumPurchasePreservingDeadline))
             AdaptiveValueRow(title: "Deadline balance before", value: MoneyFormatting.display(evaluation.result.deadlineBalanceBeforeMinor, currencyCode: evaluation.currencyCode))
             AdaptiveValueRow(title: "Deadline balance after", value: MoneyFormatting.display(evaluation.result.deadlineBalanceAfterMinor, currencyCode: evaluation.currencyCode))
         }
@@ -133,7 +249,7 @@ struct PurchaseImpactView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foresightPrimaryAction()
-            .disabled(isStale || savedDecision != nil)
+            .disabled(isStale || savedDecision != nil || amountError != nil)
 
             Button {
                 onAdjust?()
@@ -184,6 +300,7 @@ struct PurchaseImpactView: View {
     }
 
     private func save() {
+        guard amountError == nil else { return }
         do {
             // SavedDecisionStore handles duplicate prevention and rollback.
             let decision = try SavedDecisionStore.save(evaluation, in: modelContext)
@@ -202,6 +319,19 @@ struct PurchaseImpactView: View {
             "Completed now"
         case .projected(let months, let date):
             "\(months) \(months == 1 ? "month" : "months") · \(formatted(date))"
+        case .noPositiveSavingsCapacity:
+            "Unavailable: no positive monthly savings capacity"
+        case .beyondLimit:
+            "Unavailable: beyond the 1,200-month projection limit"
+        }
+    }
+
+    private func completionDateText(_ projection: GoalCompletionProjection) -> String {
+        switch projection {
+        case .completedNow:
+            "Completed now"
+        case .projected(_, let date):
+            formatted(date)
         case .noPositiveSavingsCapacity:
             "Unavailable: no positive monthly savings capacity"
         case .beyondLimit:
@@ -253,5 +383,146 @@ struct PurchaseImpactView: View {
     private func formatted(_ date: Date) -> String {
         FinancialCalendar.displayDate(fromUTCNoon: date)
             .formatted(.dateTime.day().month(.abbreviated).year())
+    }
+
+    private var projectionInputs: FinancialInputs {
+        FinancialInputs(
+            savingsMinor: evaluation.originalSavingsMinor,
+            incomeMinor: evaluation.originalIncomeMinor,
+            expensesMinor: evaluation.originalExpensesMinor,
+            targetMinor: evaluation.goalTargetMinor,
+            evaluationDate: evaluation.evaluationDate,
+            targetDate: evaluation.goalTargetDate
+        )
+    }
+
+    private var sliderSafetyMaximum: Int64 {
+        9_000_000_000_000_000
+    }
+
+    private var sliderMaximumMinor: Int64 {
+        min(evaluation.originalSavingsMinor, sliderSafetyMaximum)
+    }
+
+    private var canUseSlider: Bool {
+        sliderMaximumMinor >= 1
+    }
+
+    private func syncAmountDraft() {
+        isSyncingAmountDraft = true
+        amountDraft = MoneyFormatting.editableText(evaluation.purchaseAmountMinor, currencyCode: evaluation.currencyCode)
+        sliderValue = Double(min(evaluation.purchaseAmountMinor, sliderMaximumMinor))
+        amountError = nil
+        isSyncingAmountDraft = false
+    }
+
+    private func amountDraftChanged(_ newValue: String) {
+        guard !isSyncingAmountDraft else { return }
+        let currency = CurrencyDefinition.definition(for: evaluation.currencyCode)
+        do {
+            let parsed = try MoneyFormatting.parseMinorUnits(newValue, currency: currency)
+            guard parsed > 0 else {
+                amountError = "Purchase amount must be greater than zero."
+                return
+            }
+            guard parsed <= evaluation.originalSavingsMinor else {
+                amountError = "This purchase is higher than your current savings."
+                return
+            }
+            amountError = nil
+            if parsed <= sliderMaximumMinor {
+                isSyncingAmountDraft = true
+                sliderValue = Double(parsed)
+                isSyncingAmountDraft = false
+            }
+            onAmountChange?(parsed)
+        } catch {
+            amountError = error.localizedDescription
+        }
+    }
+
+    private func sliderChanged(_ newValue: Double) {
+        guard !isSyncingAmountDraft else { return }
+        let rounded = min(max(newValue.rounded(), 1), Double(sliderMaximumMinor))
+        let minorUnits = Int64(rounded)
+        isSyncingAmountDraft = true
+        amountDraft = MoneyFormatting.editableText(minorUnits, currencyCode: evaluation.currencyCode)
+        sliderValue = rounded
+        isSyncingAmountDraft = false
+        amountError = nil
+        onAmountChange?(minorUnits)
+    }
+
+    private func timelineControls(for projection: SavingsProjection) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Button {
+                    visibleStartMonth = max(visibleStartMonth - FinancialProjectionBuilder.defaultVisibleMonthCount, 0)
+                    selectedChartDate = nil
+                } label: {
+                    Image(systemName: "chevron.left.2")
+                        .frame(minWidth: 44)
+                }
+                .accessibilityLabel("Earlier 12-month window")
+                .disabled(!projection.canMoveEarlier)
+
+                Spacer(minLength: 12)
+
+                Button {
+                    visibleStartMonth = min(
+                        visibleStartMonth + FinancialProjectionBuilder.defaultVisibleMonthCount,
+                        FinancialCalculator.completionMonthLimit - FinancialProjectionBuilder.defaultVisibleMonthCount
+                    )
+                    selectedChartDate = nil
+                } label: {
+                    Image(systemName: "chevron.right.2")
+                        .frame(minWidth: 44)
+                }
+                .accessibilityLabel("Later 12-month window")
+                .disabled(!projection.canMoveLater)
+            }
+
+            HStack {
+                milestoneButtons(for: projection)
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+
+    private func milestoneButtons(for projection: SavingsProjection) -> some View {
+        Group {
+            Button {
+                visibleStartMonth = max(FinancialCalendar.monthsWithDeposits(from: evaluation.evaluationDate, through: projection.deadlineDate) - 2, 0)
+                selectedChartDate = projection.deadlineDate
+            } label: {
+                Label("Deadline", systemImage: "calendar")
+            }
+            .accessibilityLabel("Jump to deadline")
+            .disabled(FinancialCalendar.isBeforeDay(projection.deadlineDate, evaluation.evaluationDate))
+
+            Spacer(minLength: 12)
+
+            Button {
+                if let startMonth = FinancialProjectionBuilder.startMonthForMilestone(projection.afterPurchaseCompletionMonth ?? projection.baselineCompletionMonth) {
+                    visibleStartMonth = startMonth
+                    selectedChartDate = completionDate(from: projection.afterPurchaseResult?.completionProjection ?? projection.baselineResult.completionProjection)
+                }
+            } label: {
+                Label("Completion", systemImage: "flag.checkered")
+            }
+            .accessibilityLabel("Jump to completion")
+            .disabled(FinancialProjectionBuilder.startMonthForMilestone(projection.afterPurchaseCompletionMonth ?? projection.baselineCompletionMonth) == nil)
+        }
+    }
+
+    private func completionDate(from projection: GoalCompletionProjection) -> Date? {
+        if case .projected(_, let date) = projection {
+            return date
+        }
+        if case .completedNow = projection {
+            return evaluation.evaluationDate
+        }
+        return nil
     }
 }

@@ -34,6 +34,7 @@ struct HistoryView: View {
                                         evaluation: decision.evaluationSnapshot,
                                         mode: .saved(savedAt: decision.savedAt),
                                         onSaved: nil,
+                                        onAmountChange: nil,
                                         onAdjust: nil
                                     )
                                 } label: {

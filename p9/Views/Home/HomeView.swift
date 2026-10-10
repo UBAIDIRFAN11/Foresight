@@ -68,6 +68,7 @@ struct HomeView: View {
                                 evaluation: latestDecision.evaluationSnapshot,
                                 mode: .saved(savedAt: latestDecision.savedAt),
                                 onSaved: nil,
+                                onAmountChange: nil,
                                 onAdjust: nil
                             )
                         } label: {
@@ -203,10 +204,7 @@ struct HomeView: View {
 }
 
 func goalSort(_ lhs: FinancialGoal, _ rhs: FinancialGoal) -> Bool {
-    // Shared goal ordering: priority first, then deadline, then creation date.
-    if lhs.priorityRawValue != rhs.priorityRawValue {
-        return lhs.priorityRawValue > rhs.priorityRawValue
-    }
+    // Shared goal ordering: nearest deadline first, then creation date.
     if lhs.targetDate != rhs.targetDate {
         return lhs.targetDate < rhs.targetDate
     }

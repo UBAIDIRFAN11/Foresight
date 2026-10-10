@@ -88,22 +88,12 @@ struct GoalCard: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-
-            AdaptiveValueRow(
-                title: "Required each month",
-                value: MoneyFormatting.display(result.monthlyRequiredMinor, currencyCode: profile.preferredCurrencyCode)
-            )
-            .font(.footnote)
         }
         .foresightCard()
     }
 
     private var iconName: String {
-        switch goal.priority {
-        case .high: "star.fill"
-        case .medium: "flag.fill"
-        case .low: "leaf.fill"
-        }
+        "flag.fill"
     }
 
     private var formattedTargetDate: String {

@@ -5,7 +5,6 @@ import SwiftData
 // - goal name
 // - target amount
 // - target date (to achieve goal by)
-// - priority
 // - description (optional)
 
 
@@ -16,7 +15,6 @@ final class FinancialGoal {
     var name: String
     var targetAmountMinor: Int64
     var targetDate: Date
-    var priorityRawValue: Int
     var goalDescription: String?
 
     init(
@@ -25,7 +23,6 @@ final class FinancialGoal {
         name: String,
         targetAmountMinor: Int64,
         targetDate: Date,
-        priority: GoalPriority = .medium,
         goalDescription: String? = nil
     ) {
         self.id = id
@@ -34,28 +31,6 @@ final class FinancialGoal {
         self.targetAmountMinor = targetAmountMinor
         // Store goal deadlines as a calendar day, not an exact user-time timestamp.
         self.targetDate = FinancialCalendar.utcNoon(for: targetDate)
-        self.priorityRawValue = priority.rawValue
         self.goalDescription = goalDescription
-    }
-
-    var priority: GoalPriority {
-        get { GoalPriority(rawValue: priorityRawValue) ?? .medium }
-        set { priorityRawValue = newValue.rawValue }
-    }
-}
-
-enum GoalPriority: Int, CaseIterable, Identifiable, Sendable {
-    case low = 0
-    case medium = 1
-    case high = 2
-
-    var id: Int { rawValue }
-
-    var title: String {
-        switch self {
-        case .low: "Low"
-        case .medium: "Medium"
-        case .high: "High"
-        }
     }
 }
