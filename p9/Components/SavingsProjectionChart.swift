@@ -36,7 +36,7 @@ struct SavingsProjectionChart: View {
                     )
                     .foregroundStyle(ForesightTheme.accent)
                     .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(.stepStart)
+                    .interpolationMethod(.stepEnd)
                 }
 
                 if projection.hasComparison {
@@ -49,7 +49,7 @@ struct SavingsProjectionChart: View {
                             )
                             .foregroundStyle(Color.blue)
                             .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round, dash: [6, 5]))
-                            .interpolationMethod(.stepStart)
+                            .interpolationMethod(.stepEnd)
                         }
                     }
                 }

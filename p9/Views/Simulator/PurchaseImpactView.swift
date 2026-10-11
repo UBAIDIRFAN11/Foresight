@@ -15,14 +15,18 @@ struct PurchaseImpactView: View {
     let onAdjust: (() -> Void)?
 
     @Environment(\.modelContext) private var modelContext
+    @FocusState private var focusedField: Field?
     @State private var savedDecision: SavedDecision?
     @State private var saveError: String?
     @State private var amountDraft = ""
     @State private var amountError: String?
     @State private var sliderValue = 0.0
-    @State private var isSyncingAmountDraft = false
     @State private var visibleStartMonth = 0
     @State private var selectedChartDate: Date?
+
+    private enum Field {
+        case amount
+    }
 
     var body: some View {
         ScrollView {
@@ -58,12 +62,17 @@ struct PurchaseImpactView: View {
         .navigationTitle("Purchase Impact")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            syncAmountDraft()
+            syncAmountDraft(forceDraftUpdate: true)
         }
         .onChange(of: evaluation.id) { _, _ in
             savedDecision = nil
             saveError = nil
             syncAmountDraft()
+        }
+        .onChange(of: focusedField) { oldValue, newValue in
+            if oldValue == .amount, newValue != .amount, amountError == nil {
+                syncAmountDraft(forceDraftUpdate: true)
+            }
         }
     }
 
@@ -165,23 +174,18 @@ struct PurchaseImpactView: View {
                     Text("Exact amount")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    TextField("0", text: $amountDraft)
+                    TextField("0", text: amountDraftBinding)
                         .keyboardType(.decimalPad)
                         .textFieldStyle(.roundedBorder)
-                        .onChange(of: amountDraft) { _, newValue in
-                            amountDraftChanged(newValue)
-                        }
+                        .focused($focusedField, equals: .amount)
                 }
 
                 if canUseSlider {
                     Slider(
-                        value: $sliderValue,
+                        value: sliderBinding,
                         in: 1...Double(sliderMaximumMinor),
                         step: 1
                     )
-                    .onChange(of: sliderValue) { _, newValue in
-                        sliderChanged(newValue)
-                    }
                     HStack {
                         Text(MoneyFormatting.display(1, currencyCode: evaluation.currencyCode))
                         Spacer()
@@ -249,7 +253,7 @@ struct PurchaseImpactView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foresightPrimaryAction()
-            .disabled(isStale || savedDecision != nil || amountError != nil)
+            .disabled(isStale || savedDecision != nil || amountError != nil || !amountDraftMatchesEvaluation)
 
             Button {
                 onAdjust?()
@@ -300,7 +304,7 @@ struct PurchaseImpactView: View {
     }
 
     private func save() {
-        guard amountError == nil else { return }
+        guard amountError == nil, amountDraftMatchesEvaluation else { return }
         do {
             // SavedDecisionStore handles duplicate prevention and rollback.
             let decision = try SavedDecisionStore.save(evaluation, in: modelContext)
@@ -408,16 +412,40 @@ struct PurchaseImpactView: View {
         sliderMaximumMinor >= 1
     }
 
-    private func syncAmountDraft() {
-        isSyncingAmountDraft = true
-        amountDraft = MoneyFormatting.editableText(evaluation.purchaseAmountMinor, currencyCode: evaluation.currencyCode)
+    private var amountDraftBinding: Binding<String> {
+        Binding(
+            get: { amountDraft },
+            set: { amountDraftChanged($0) }
+        )
+    }
+
+    private var sliderBinding: Binding<Double> {
+        Binding(
+            get: { min(max(sliderValue, 1), Double(sliderMaximumMinor)) },
+            set: { sliderChanged($0) }
+        )
+    }
+
+    private var amountDraftMatchesEvaluation: Bool {
+        let currency = CurrencyDefinition.definition(for: evaluation.currencyCode)
+        guard let parsed = try? MoneyFormatting.parseMinorUnits(amountDraft, currency: currency),
+              parsed > 0,
+              parsed <= evaluation.originalSavingsMinor else { return false }
+        return parsed == evaluation.purchaseAmountMinor
+    }
+
+    private func syncAmountDraft(forceDraftUpdate: Bool = false) {
+        // Evaluation updates acknowledge the user's input; only an explicit
+        // formatting event should replace the text they are still editing.
+        if forceDraftUpdate {
+            amountDraft = MoneyFormatting.editableText(evaluation.purchaseAmountMinor, currencyCode: evaluation.currencyCode)
+            amountError = nil
+        }
         sliderValue = Double(min(evaluation.purchaseAmountMinor, sliderMaximumMinor))
-        amountError = nil
-        isSyncingAmountDraft = false
     }
 
     private func amountDraftChanged(_ newValue: String) {
-        guard !isSyncingAmountDraft else { return }
+        amountDraft = newValue
         let currency = CurrencyDefinition.definition(for: evaluation.currencyCode)
         do {
             let parsed = try MoneyFormatting.parseMinorUnits(newValue, currency: currency)
@@ -431,9 +459,7 @@ struct PurchaseImpactView: View {
             }
             amountError = nil
             if parsed <= sliderMaximumMinor {
-                isSyncingAmountDraft = true
                 sliderValue = Double(parsed)
-                isSyncingAmountDraft = false
             }
             onAmountChange?(parsed)
         } catch {
@@ -442,13 +468,10 @@ struct PurchaseImpactView: View {
     }
 
     private func sliderChanged(_ newValue: Double) {
-        guard !isSyncingAmountDraft else { return }
         let rounded = min(max(newValue.rounded(), 1), Double(sliderMaximumMinor))
         let minorUnits = Int64(rounded)
-        isSyncingAmountDraft = true
         amountDraft = MoneyFormatting.editableText(minorUnits, currencyCode: evaluation.currencyCode)
         sliderValue = rounded
-        isSyncingAmountDraft = false
         amountError = nil
         onAmountChange?(minorUnits)
     }
