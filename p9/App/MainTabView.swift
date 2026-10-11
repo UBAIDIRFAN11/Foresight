@@ -1,9 +1,9 @@
 import SwiftUI
 
-//This file's job is to decide which major section of the app the user is looking at, provide the bottom tab bar, and coordinate movement between those sections.
+//This file's job is to decide which major section of the app the user is looking at, provide the bottom tab bar, and coordinate movement between those sections. Also binds tab/navigation state to AppRouter so reminders can open saved decisions, goals, or simulator prefill requests.
 
 struct MainTabView: View {
-    private enum AppTab {
+    enum AppTab {
         case home
         case goals
         case simulator
@@ -14,12 +14,12 @@ struct MainTabView: View {
     //financial profile is passed into the whole app, as several parts of the app need access to it.
     @Bindable var profile: FinancialProfile
     let duplicateProfileCount: Int
-    @State private var selectedTab: AppTab = .home
+    @EnvironmentObject private var router: AppRouter
     // When Home opens the simulator, this carries the focused goal across tabs.
     @State private var simulatorGoalID: UUID?
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: $router.selectedTab) {
             NavigationStack {
                 HomeView(
                     profile: profile,
@@ -27,7 +27,7 @@ struct MainTabView: View {
                     onEvaluatePurchase: { goalID in
                         //jump straight to Simulator with Home's focused goal selected.
                         simulatorGoalID = goalID
-                        selectedTab = .simulator
+                        router.selectedTab = .simulator
                     }
                 )
             }
@@ -36,7 +36,7 @@ struct MainTabView: View {
             }
             .tag(AppTab.home)
 
-            NavigationStack {
+            NavigationStack(path: $router.goalPath) {
                 GoalsView(profile: profile)
             }
             .tabItem {
@@ -45,9 +45,16 @@ struct MainTabView: View {
             .tag(AppTab.goals)
 
             NavigationStack {
-                SimulatorView(profile: profile, initialGoalID: simulatorGoalID) { _ in
+                SimulatorView(
+                    profile: profile,
+                    initialGoalID: simulatorGoalID,
+                    prefill: router.simulatorPrefill,
+                    onPrefillConsumed: { token in
+                        router.consumeSimulatorPrefill(token: token)
+                    }
+                ) { _ in
                     //successful save should take the user to their saved history.
-                    selectedTab = .history
+                    router.selectedTab = .history
                 }
             }
             .tabItem {
@@ -55,7 +62,7 @@ struct MainTabView: View {
             }
             .tag(AppTab.simulator)
 
-            NavigationStack {
+            NavigationStack(path: $router.historyPath) {
                 HistoryView()
             }
             .tabItem {

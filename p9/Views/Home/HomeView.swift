@@ -8,6 +8,7 @@ struct HomeView: View {
     let onEvaluatePurchase: (UUID?) -> Void
     @Query(sort: [SortDescriptor(\FinancialGoal.targetDate), SortDescriptor(\FinancialGoal.createdAt)]) private var goals: [FinancialGoal]
     @Query(sort: [SortDescriptor(\SavedDecision.savedAt, order: .reverse)]) private var savedDecisions: [SavedDecision]
+    @EnvironmentObject private var router: AppRouter
     @State private var focusedGoalID: UUID?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -69,7 +70,10 @@ struct HomeView: View {
                                 mode: .saved(savedAt: latestDecision.savedAt),
                                 onSaved: nil,
                                 onAmountChange: nil,
-                                onAdjust: nil
+                                onAdjust: nil,
+                                onReevaluate: { prefill in
+                                    router.prefillSimulator(prefill)
+                                }
                             )
                         } label: {
                             recentDecisionRow(latestDecision)

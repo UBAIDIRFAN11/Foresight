@@ -20,6 +20,12 @@ struct SettingsView: View {
                 }
 
                 NavigationLink {
+                    RemindersSettingsView()
+                } label: {
+                    Label("Reminders", systemImage: "bell")
+                }
+
+                NavigationLink {
                     AboutView()
                 } label: {
                     Label("About", systemImage: "info.circle")

@@ -1,9 +1,12 @@
+// Lists saved purchase snapshots and opens them by evaluation UUID so reminder
+// navigation displays the original historical calculation.
 import SwiftUI
 import SwiftData
 
 struct HistoryView: View {
     // Newest saved decisions appear first in the history list.
     @Query(sort: [SortDescriptor(\SavedDecision.savedAt, order: .reverse)]) private var decisions: [SavedDecision]
+    @EnvironmentObject private var router: AppRouter
 
     var body: some View {
         ScrollView {
@@ -28,16 +31,7 @@ struct HistoryView: View {
                             Text(group.month)
                                 .font(.headline)
                             ForEach(group.decisions) { decision in
-                                NavigationLink {
-                                    // Open the saved snapshot, not a recalculation.
-                                    PurchaseImpactView(
-                                        evaluation: decision.evaluationSnapshot,
-                                        mode: .saved(savedAt: decision.savedAt),
-                                        onSaved: nil,
-                                        onAmountChange: nil,
-                                        onAdjust: nil
-                                    )
-                                } label: {
+                                NavigationLink(value: decision.evaluationID) {
                                     decisionRow(decision)
                                 }
                                 .buttonStyle(.plain)
@@ -49,6 +43,29 @@ struct HistoryView: View {
             .foresightReadableContent()
         }
         .background(ForesightTheme.background)
+        .navigationDestination(for: UUID.self) { id in
+            if let decision = decisions.first(where: { $0.evaluationID == id }) {
+                // Open the saved snapshot, not a recalculation.
+                PurchaseImpactView(
+                    evaluation: decision.evaluationSnapshot,
+                    mode: .saved(savedAt: decision.savedAt),
+                    onSaved: nil,
+                    onAmountChange: nil,
+                    onAdjust: nil,
+                    onReevaluate: { prefill in
+                        router.prefillSimulator(prefill)
+                    }
+                )
+            } else {
+                ContentUnavailableView(
+                    "Decision Missing",
+                    systemImage: "questionmark.folder",
+                    description: Text("This saved decision is no longer available.")
+                )
+                .foresightReadableContent()
+                .background(ForesightTheme.background)
+            }
+        }
     }
 
     private var groupedDecisions: [(month: String, decisions: [SavedDecision])] {

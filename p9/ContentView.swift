@@ -5,11 +5,16 @@
 //  Created by Ubaid on 29/9/2026.
 //
 
+// Loads the local financial profile and triggers reminder reconciliation when
+// the app becomes active or system time-zone state changes.
 import SwiftUI
 import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var reminderCoordinator: ReminderCoordinator
+    @AppStorage("remindersPaused") private var remindersPaused = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var loadState: LoadState = .loading
 
     var body: some View {
@@ -64,6 +69,19 @@ struct ContentView: View {
         }
         .task {
             loadProfile()
+            reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
+            await applyPendingNotificationActions()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            loadProfile()
+            reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
+            Task {
+                await applyPendingNotificationActions()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
+            reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
         }
     }
 
@@ -81,6 +99,29 @@ struct ContentView: View {
             loadState = .failed(message: error.localizedDescription)
         }
     }
+
+    private func applyPendingNotificationActions() async {
+        let payloads = await NotificationActionBridge.shared.consumePendingPayloads()
+        for payload in payloads {
+            guard payload.kind == .purchaseReview else { continue }
+            do {
+                guard let record = try ReminderStore.existing(kind: .purchaseReview, sourceID: payload.sourceID, in: modelContext),
+                      record.scheduleRevision == payload.revision else {
+                    continue
+                }
+                let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date().addingTimeInterval(86_400)
+                record.deliveryDate = tomorrow
+                record.isEnabled = true
+                record.reviewedAt = nil
+                record.scheduleRevision = UUID()
+                record.updatedAt = Date()
+                try modelContext.save()
+                reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused, requestAuthorizationIfNeeded: true)
+            } catch {
+                modelContext.rollback()
+            }
+        }
+    }
 }
 
 private enum LoadState {
@@ -92,5 +133,5 @@ private enum LoadState {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [FinancialProfile.self, FinancialGoal.self, SavedDecision.self], inMemory: true)
+        .modelContainer(for: [FinancialProfile.self, FinancialGoal.self, SavedDecision.self, ReminderRecord.self], inMemory: true)
 }

@@ -1,18 +1,28 @@
+// Shows the live goal calculation and owns the optional weekly check-in reminder
+// controls for that specific goal.
 import SwiftUI
 import SwiftData
 
 struct GoalDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var reminderCoordinator: ReminderCoordinator
+    @AppStorage("remindersPaused") private var remindersPaused = false
     @Query private var goals: [FinancialGoal]
+    @Query private var reminderRecords: [ReminderRecord]
 
     @Bindable var profile: FinancialProfile
     @State private var isEditing = false
     @State private var isConfirmingDelete = false
     @State private var errorMessage: String?
+    @State private var reminderError: String?
+    @State private var reminderEnabled = false
+    @State private var selectedWeekday = 1
+    @State private var selectedTime = Calendar.current.date(from: DateComponents(hour: 18, minute: 0)) ?? Date()
     @State private var visibleStartMonth = 0
     @State private var selectedChartDate: Date?
-    private let today = FinancialCalendar.localEvaluationDay()
+    @State private var today = FinancialCalendar.localEvaluationDay()
 
     init(goalID: UUID, profile: FinancialProfile) {
         // Query only the selected goal so edits/deletes update this view automatically.
@@ -33,6 +43,7 @@ struct GoalDetailView: View {
                         GoalCard(goal: goal, profile: profile, today: today, showsNavigationIndicator: false)
                         projectionSection(for: goal)
                         detailRows(for: goal)
+                        checkInSection(for: goal)
                         deleteButton
                         if let errorMessage {
                             Text(errorMessage)
@@ -62,6 +73,13 @@ struct GoalDetailView: View {
                     }
                     Button("Cancel", role: .cancel) {}
                 }
+                .onAppear {
+                    loadReminderDraft(for: goal)
+                    reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
+                }
+                .onChange(of: reminderRecords.map(\.scheduleRevision)) { _, _ in
+                    loadReminderDraft(for: goal)
+                }
             } else {
                 ScrollView {
                     ContentUnavailableView("Goal Missing", systemImage: "questionmark.folder", description: Text("This goal is no longer available."))
@@ -69,6 +87,11 @@ struct GoalDetailView: View {
                 }
                 .background(ForesightTheme.background)
             }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            today = FinancialCalendar.localEvaluationDay()
+            reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
         }
     }
 
@@ -228,10 +251,118 @@ struct GoalDetailView: View {
         .controlSize(.large)
     }
 
+    private func checkInSection(for goal: FinancialGoal) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Weekly Check-In")
+                .font(.headline)
+            Toggle("Remind me to review this goal", isOn: reminderBinding(for: goal))
+            if reminderEnabled {
+                Picker("Weekday", selection: $selectedWeekday) {
+                    ForEach(1...7, id: \.self) { weekday in
+                        Text(Calendar.current.weekdaySymbols[weekday - 1]).tag(weekday)
+                    }
+                }
+                DatePicker("Time", selection: $selectedTime, displayedComponents: .hourAndMinute)
+                Text(goalReminderStatus)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Check-ins are optional. Foresight does not automatically track actual savings.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            NavigationLink {
+                FinancialProfileView(mode: .editing(profile))
+            } label: {
+                Label("Update Financial Profile", systemImage: "person.text.rectangle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+
+            if let reminderError {
+                Label(reminderError, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(ForesightTheme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .foresightCard()
+        .onChange(of: selectedWeekday) { _, _ in
+            saveGoalReminder(for: goal, enabled: reminderEnabled)
+        }
+        .onChange(of: selectedTime) { _, _ in
+            saveGoalReminder(for: goal, enabled: reminderEnabled)
+        }
+    }
+
+    private func reminderBinding(for goal: FinancialGoal) -> Binding<Bool> {
+        Binding(
+            get: { reminderEnabled },
+            set: { newValue in
+                reminderEnabled = newValue
+                saveGoalReminder(for: goal, enabled: newValue)
+            }
+        )
+    }
+
+    private func loadReminderDraft(for goal: FinancialGoal) {
+        guard let record = goalReminder(for: goal) else {
+            reminderEnabled = false
+            selectedWeekday = 1
+            selectedTime = Calendar.current.date(from: DateComponents(hour: 18, minute: 0)) ?? Date()
+            return
+        }
+        reminderEnabled = record.isEnabled
+        selectedWeekday = record.weekday
+        selectedTime = Calendar.current.date(from: DateComponents(hour: record.hour, minute: record.minute)) ?? selectedTime
+    }
+
+    private func saveGoalReminder(for goal: FinancialGoal, enabled: Bool) {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: selectedTime)
+        do {
+            _ = try ReminderStore.upsertGoalReminder(
+                for: goal,
+                weekday: selectedWeekday,
+                hour: components.hour ?? 18,
+                minute: components.minute ?? 0,
+                isEnabled: enabled,
+                in: modelContext
+            )
+            reminderError = nil
+            reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused, requestAuthorizationIfNeeded: enabled)
+        } catch {
+            reminderError = error.localizedDescription
+        }
+    }
+
+    private func goalReminder(for goal: FinancialGoal) -> ReminderRecord? {
+        reminderRecords.first {
+            $0.kind == .goalCheckIn && $0.sourceID == goal.id
+        }
+    }
+
+    private var goalReminderStatus: String {
+        if remindersPaused {
+            return "Saved, but reminders are paused in Settings."
+        }
+        if reminderCoordinator.deliverySettings.permissionState == .denied {
+            return "Saved, but notification permission is denied."
+        }
+        return "Weekly reminder saved for \(Calendar.current.weekdaySymbols[selectedWeekday - 1]) at \(selectedTime.formatted(date: .omitted, time: .shortened))."
+    }
+
     private func delete(_ goal: FinancialGoal) {
+        if let reminder = goalReminder(for: goal) {
+            modelContext.delete(reminder)
+        }
         modelContext.delete(goal)
         do {
             try modelContext.save()
+            reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
             dismiss()
         } catch {
             // Roll back so a failed delete does not leave the context half-changed.

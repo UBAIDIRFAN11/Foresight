@@ -4,6 +4,8 @@ import SwiftData
 struct SimulatorView: View {
     @Bindable var profile: FinancialProfile
     let initialGoalID: UUID?
+    let prefill: SimulatorPrefill?
+    let onPrefillConsumed: (UUID) -> Void
     // MainTabView uses this callback to switch to History after a successful save.
     let onSaved: (SavedDecision) -> Void
 
@@ -15,13 +17,23 @@ struct SimulatorView: View {
     // The current unsaved calculation result, if the user has calculated one.
     @State private var evaluation: PurchaseImpactEvaluation?
     @State private var isShowingResult = false
+    @State private var pendingPrefill: SimulatorPrefill?
+    @State private var isConfirmingDraftReplacement = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
 
-    init(profile: FinancialProfile, initialGoalID: UUID? = nil, onSaved: @escaping (SavedDecision) -> Void = { _ in }) {
+    init(
+        profile: FinancialProfile,
+        initialGoalID: UUID? = nil,
+        prefill: SimulatorPrefill? = nil,
+        onPrefillConsumed: @escaping (UUID) -> Void = { _ in },
+        onSaved: @escaping (SavedDecision) -> Void = { _ in }
+    ) {
         self.profile = profile
         self.initialGoalID = initialGoalID
+        self.prefill = prefill
+        self.onPrefillConsumed = onPrefillConsumed
         self.onSaved = onSaved
     }
 
@@ -143,7 +155,8 @@ struct SimulatorView: View {
                     },
                     onAdjust: {
                         isShowingResult = false
-                    }
+                    },
+                    onReevaluate: nil
                 )
             }
         }
@@ -157,9 +170,28 @@ struct SimulatorView: View {
         }
         .onAppear {
             reconcileSelection(preferredID: initialGoalID)
+            receivePrefillIfNeeded(prefill)
         }
         .onChange(of: goals.map(\.id)) { _, _ in
             reconcileSelection(preferredID: selectedGoalID)
+        }
+        .onChange(of: prefill?.token) { _, _ in
+            receivePrefillIfNeeded(prefill)
+        }
+        .confirmationDialog("Replace current simulator draft?", isPresented: $isConfirmingDraftReplacement, titleVisibility: .visible) {
+            Button("Replace Draft") {
+                if let pendingPrefill {
+                    applyPrefill(pendingPrefill)
+                }
+            }
+            Button("Keep Draft", role: .cancel) {
+                if let token = pendingPrefill?.token {
+                    onPrefillConsumed(token)
+                }
+                pendingPrefill = nil
+            }
+        } message: {
+            Text("Re-evaluating a saved decision will replace the current unsaved simulator fields.")
         }
     }
 
@@ -188,6 +220,41 @@ struct SimulatorView: View {
             selectedGoalID = sortedGoals.first?.id
         }
     }
+
+    private func receivePrefillIfNeeded(_ prefill: SimulatorPrefill?) {
+        guard let prefill else { return }
+        if hasUnsavedDraft {
+            pendingPrefill = prefill
+            isConfirmingDraftReplacement = true
+        } else {
+            applyPrefill(prefill)
+        }
+    }
+
+    private var hasUnsavedDraft: Bool {
+        !FinancialFormValidation.cleanName(purchaseName).isEmpty ||
+        !amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        evaluation != nil
+    }
+
+    private func applyPrefill(_ prefill: SimulatorPrefill) {
+        purchaseName = prefill.purchaseName
+        if prefill.currencyCode == profile.preferredCurrencyCode {
+            amount = MoneyFormatting.editableText(prefill.amountMinor, currencyCode: prefill.currencyCode)
+        } else {
+            amount = ""
+            errorMessage = "The original decision used \(prefill.currencyCode). Enter an amount in \(profile.preferredCurrencyCode) to re-evaluate with your current profile."
+        }
+        reconcileSelection(preferredID: prefill.preferredGoalID)
+        if selectedGoalID != prefill.preferredGoalID {
+            errorMessage = "The original goal is no longer available. Choose a current goal before calculating."
+        }
+        evaluation = nil
+        isShowingResult = false
+        pendingPrefill = nil
+        onPrefillConsumed(prefill.token)
+    }
+
 
     private func calculateImpact() {
         focusedField = nil

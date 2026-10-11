@@ -13,11 +13,18 @@ struct PurchaseImpactView: View {
     let onSaved: ((SavedDecision) -> Void)?
     let onAmountChange: ((Int64) -> Void)?
     let onAdjust: (() -> Void)?
+    let onReevaluate: ((SimulatorPrefill) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var reminderCoordinator: ReminderCoordinator
+    @AppStorage("remindersPaused") private var remindersPaused = false
+    @Query private var reminderRecords: [ReminderRecord]
     @FocusState private var focusedField: Field?
     @State private var savedDecision: SavedDecision?
     @State private var saveError: String?
+    @State private var reminderError: String?
+    @State private var isShowingReminderSheet = false
+    @State private var customReminderDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
     @State private var amountDraft = ""
     @State private var amountError: String?
     @State private var sliderValue = 0.0
@@ -54,6 +61,13 @@ struct PurchaseImpactView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if let reminderError {
+                    Label(reminderError, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(ForesightTheme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 actions
             }
             .foresightReadableContent()
@@ -73,6 +87,12 @@ struct PurchaseImpactView: View {
             if oldValue == .amount, newValue != .amount, amountError == nil {
                 syncAmountDraft(forceDraftUpdate: true)
             }
+        }
+        .sheet(isPresented: $isShowingReminderSheet) {
+            NavigationStack {
+                reminderSetupSheet
+            }
+            .presentationDetents([.medium, .large])
         }
     }
 
@@ -241,8 +261,7 @@ struct PurchaseImpactView: View {
     private var actions: some View {
         switch mode {
         case .saved:
-            // History/Home presentations are read-only.
-            EmptyView()
+            savedActions
         case .live(let isStale, _):
             Button {
                 save()
@@ -256,6 +275,18 @@ struct PurchaseImpactView: View {
             .disabled(isStale || savedDecision != nil || amountError != nil || !amountDraftMatchesEvaluation)
 
             Button {
+                isShowingReminderSheet = true
+            } label: {
+                Label("Save & Remind Me", systemImage: "bell.badge")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(isStale || amountError != nil || !amountDraftMatchesEvaluation)
+
+            Button {
                 onAdjust?()
             } label: {
                 Label("Adjust Purchase", systemImage: "slider.horizontal.3")
@@ -265,6 +296,117 @@ struct PurchaseImpactView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
+        }
+    }
+
+    private var savedActions: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Reminder")
+                    .font(.headline)
+                Text(reminderStatusText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    isShowingReminderSheet = true
+                } label: {
+                    Label(activeReminder == nil ? "Set Review Reminder" : "Reschedule Reminder", systemImage: "bell")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+
+                if let activeReminder {
+                    Button(role: .destructive) {
+                        cancelReminder(activeReminder)
+                    } label: {
+                        Label("Cancel Reminder", systemImage: "bell.slash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+
+                    Button {
+                        markReviewed(activeReminder)
+                    } label: {
+                        Label("Mark Reviewed", systemImage: "checkmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .foresightPrimaryAction()
+                } else if purchaseReminder?.isReviewed == true {
+                    Label("Reviewed. This only records that you reconsidered the purchase; it does not change actual savings.", systemImage: "checkmark.circle")
+                        .font(.footnote)
+                        .foregroundStyle(ForesightTheme.success)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .foresightCard()
+
+            Button {
+                if let decision = currentDecision {
+                    onReevaluate?(SimulatorPrefill(decision: decision))
+                }
+            } label: {
+                Label("Re-evaluate With Current Profile", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(currentDecision == nil)
+        }
+    }
+
+    private var reminderSetupSheet: some View {
+        List {
+            Section {
+                reminderOptionButton("Tomorrow", date: Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date().addingTimeInterval(86_400))
+                reminderOptionButton("In 3 Days", date: Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date().addingTimeInterval(259_200))
+                reminderOptionButton("In 7 Days", date: Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date().addingTimeInterval(604_800))
+            }
+
+            Section("Custom") {
+                DatePicker(
+                    "Date and Time",
+                    selection: $customReminderDate,
+                    in: Date()...,
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                Button {
+                    saveReminder(for: customReminderDate)
+                } label: {
+                    Label("Use Custom Time", systemImage: "calendar.badge.clock")
+                }
+            }
+
+            if reminderCoordinator.deliverySettings.permissionState == .denied {
+                Section {
+                    Button("Open iOS Settings") {
+                        reminderCoordinator.openSystemSettings()
+                    }
+                } footer: {
+                    Text("The reminder is saved, but iOS notification permission is currently denied.")
+                }
+            }
+        }
+        .navigationTitle("Review Reminder")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done") {
+                    isShowingReminderSheet = false
+                }
+            }
+        }
+    }
+
+    private func reminderOptionButton(_ title: String, date: Date) -> some View {
+        Button {
+            saveReminder(for: date)
+        } label: {
+            Label(title, systemImage: "clock")
         }
     }
 
@@ -314,6 +456,85 @@ struct PurchaseImpactView: View {
         } catch {
             saveError = "Could not save this decision. \(error.localizedDescription)"
         }
+    }
+
+    @discardableResult
+    private func ensureSavedDecision() throws -> SavedDecision {
+        if let savedDecision {
+            return savedDecision
+        }
+        if let currentDecision {
+            savedDecision = currentDecision
+            return currentDecision
+        }
+        let decision = try SavedDecisionStore.save(evaluation, in: modelContext)
+        savedDecision = decision
+        saveError = nil
+        onSaved?(decision)
+        return decision
+    }
+
+    private func saveReminder(for date: Date) {
+        do {
+            let decision = try ensureSavedDecision()
+            _ = try ReminderStore.upsertPurchaseReminder(for: decision, deliveryDate: date, in: modelContext)
+            reminderError = nil
+            isShowingReminderSheet = false
+            reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused, requestAuthorizationIfNeeded: true)
+        } catch {
+            reminderError = error.localizedDescription
+        }
+    }
+
+    private func cancelReminder(_ reminder: ReminderRecord) {
+        do {
+            try ReminderStore.cancel(reminder, in: modelContext)
+            reminderError = nil
+            reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
+        } catch {
+            reminderError = error.localizedDescription
+        }
+    }
+
+    private func markReviewed(_ reminder: ReminderRecord) {
+        do {
+            try ReminderStore.markReviewed(reminder, in: modelContext)
+            reminderError = nil
+            reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
+        } catch {
+            reminderError = error.localizedDescription
+        }
+    }
+
+    private var purchaseReminder: ReminderRecord? {
+        reminderRecords.first {
+            $0.kind == .purchaseReview && $0.sourceID == evaluation.id
+        }
+    }
+
+    private var activeReminder: ReminderRecord? {
+        guard let record = purchaseReminder, record.isEnabled, !record.isReviewed else { return nil }
+        return record
+    }
+
+    private var reminderStatusText: String {
+        if let activeReminder, let date = activeReminder.deliveryDate {
+            let suffix = remindersPaused ? " Paused in Settings." : ""
+            return "Scheduled for \(date.formatted(date: .abbreviated, time: .shortened)).\(suffix)"
+        }
+        if purchaseReminder?.isReviewed == true {
+            return "Reviewed. No pending reminder."
+        }
+        return "No review reminder is scheduled."
+    }
+
+    private var currentDecision: SavedDecision? {
+        let evaluationID = evaluation.id
+        return savedDecision ?? (try? modelContext.fetch(FetchDescriptor<SavedDecision>(
+            predicate: #Predicate<SavedDecision> { decision in
+                decision.evaluationID == evaluationID
+            }
+        )).first)
     }
 
     private func completionText(_ projection: GoalCompletionProjection) -> String {
