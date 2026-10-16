@@ -20,8 +20,15 @@ struct GoalDetailView: View {
     @State private var reminderEnabled = false
     @State private var selectedWeekday = 1
     @State private var selectedTime = Calendar.current.date(from: DateComponents(hour: 18, minute: 0)) ?? Date()
+    
+    
+    //tracks the beginning of displayed timeline
     @State private var visibleStartMonth = 0
+    
+    //tracks the selected chart date
     @State private var selectedChartDate: Date?
+    
+    //provides the current day for projection
     @State private var today = FinancialCalendar.localEvaluationDay()
 
     init(goalID: UUID, profile: FinancialProfile) {
@@ -41,6 +48,8 @@ struct GoalDetailView: View {
                             .font(.largeTitle.weight(.bold))
                             .fixedSize(horizontal: false, vertical: true)
                         GoalCard(goal: goal, profile: profile, today: today, showsNavigationIndicator: false)
+                        
+                        //place the chart on the screen
                         projectionSection(for: goal)
                         detailRows(for: goal)
                         checkInSection(for: goal)
@@ -118,7 +127,11 @@ struct GoalDetailView: View {
     }
 
     private func projectionSection(for goal: FinancialGoal) -> some View {
+        
+        //create financial inputs from the users current financial profile and selected goal
         let inputs = financialInputs(for: goal)
+        
+        //create a projection for current savings path, target, and deadline
         let projection = FinancialProjectionBuilder.build(
             inputs: inputs,
             visibleStartMonth: visibleStartMonth
@@ -142,11 +155,14 @@ struct GoalDetailView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                
+                //pass the projection into the chart
                 SavingsProjectionChart(
                     projection: projection,
                     currencyCode: profile.preferredCurrencyCode,
                     selectedDate: $selectedChartDate
                 )
+                //enable user to move between 12 month windows
                 timelineControls(for: projection)
             case .failure(let error):
                 Label(error.localizedDescription, systemImage: "chart.xyaxis.line")

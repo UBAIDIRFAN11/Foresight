@@ -1,9 +1,19 @@
 import SwiftUI
 import Charts
 
+//this file is responsible for drawing the chart. It draws:
+// - an orange solid baseline line: shows trajectory under current circumstances (assume nothing changes)
+// - an opt. dashed blue line: shows the impact after a purchase is made
+// - a green dashed horizontal line: represents target
+// - a vertical dot-dashed line: represents deadline
+
 struct SavingsProjectionChart: View {
+    
+    //it receives (from FinancialProjectionBuilder):
     let projection: SavingsProjection
-    let currencyCode: String
+    let currencyCode: String //tells it how to format money in the chart
+    
+    //binding connects selected chart date to parent view's state
     @Binding var selectedDate: Date?
 
     private var selectedSample: SavingsProjectionSample? {
@@ -28,8 +38,10 @@ struct SavingsProjectionChart: View {
         VStack(alignment: .leading, spacing: 14) {
             legend
             Chart {
+                //loop through the monthly samples and draw the baseline line
                 ForEach(projection.samples) { sample in
                     LineMark(
+                        //x,y represents the balance at a particular month
                         x: .value("Month", sample.date),
                         y: .value("Balance", majorUnits(sample.baselineBalanceMinor)),
                         series: .value("Scenario", "Baseline")
@@ -40,6 +52,7 @@ struct SavingsProjectionChart: View {
                 }
 
                 if projection.hasComparison {
+                    //loop through samples to draw the after purchase line
                     ForEach(projection.samples) { sample in
                         if let afterPurchaseBalanceMinor = sample.afterPurchaseBalanceMinor {
                             LineMark(
@@ -54,10 +67,12 @@ struct SavingsProjectionChart: View {
                     }
                 }
 
+                //drawing horizontal target line
                 RuleMark(y: .value("Goal target", majorUnits(projection.targetMinor)))
                     .foregroundStyle(ForesightTheme.success.opacity(0.8))
                     .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
 
+                //drawing vertical deadline line (provided it falls withiin the displayed time range)
                 if projection.deadlineDate >= (projection.samples.first?.date ?? projection.deadlineDate),
                    projection.deadlineDate <= (projection.samples.last?.date ?? projection.deadlineDate) {
                     RuleMark(x: .value("Deadline", projection.deadlineDate))
@@ -66,6 +81,8 @@ struct SavingsProjectionChart: View {
                 }
 
                 if let selectedSample {
+                    
+                    //highlighting the selected month with a circle
                     PointMark(
                         x: .value("Selected month", selectedSample.date),
                         y: .value("Baseline balance", majorUnits(selectedSample.baselineBalanceMinor))
@@ -93,7 +110,7 @@ struct SavingsProjectionChart: View {
                     }
                 }
             }
-            .chartXSelection(value: chartSelection)
+            .chartXSelection(value: chartSelection) //enables horizontal selection on the chart
             .chartXScale(domain: chartXDomain)
             .chartYAxis {
                 AxisMarks(values: .automatic(desiredCount: 4)) { value in
@@ -132,6 +149,7 @@ struct SavingsProjectionChart: View {
         return first...last
     }
 
+    //receives the selected date and passes it to nearestSampleDate
     private var chartSelection: Binding<Date?> {
         Binding(
             get: {
@@ -210,6 +228,7 @@ struct SavingsProjectionChart: View {
 
     private var navigationControls: some View {
         HStack {
+            //buttons to move the selected point one sample back or forward
             Button {
                 moveSelection(by: -1)
             } label: {

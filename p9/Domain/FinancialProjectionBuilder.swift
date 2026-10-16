@@ -1,17 +1,26 @@
 import Foundation
 
+//this file is responsible for producing monthly points that a chart can draw.
+//it does this by being given a FinancialProfile (monthly income/savings/expenses), a goal, and optionally a purchase amount.
+
+//each SavingsprojectionSample represents 1 point on chart
 nonisolated struct SavingsProjectionSample: Identifiable, Equatable, Sendable {
+    //this all tells, for example: at month 6, on this date, user would have $300 normally, or $200 after purchase.
     let date: Date
     let monthOffset: Int
     let baselineBalanceMinor: Int64
     let afterPurchaseBalanceMinor: Int64?
-    let isDeadline: Bool
+    let isDeadline: Bool //indicates whether a point represents the goal deadline
 
     var id: String {
         "\(Int(date.timeIntervalSince1970))-\(monthOffset)-\(isDeadline)"
     }
+    
+    
 }
 
+//this groups all the information required to draw the chart
+//SavingsProjectionSample represents 1 data point, SavingsProjection represents the complete chart
 nonisolated struct SavingsProjection: Equatable, Sendable {
     let samples: [SavingsProjectionSample]
     let targetMinor: Int64
@@ -24,14 +33,17 @@ nonisolated struct SavingsProjection: Equatable, Sendable {
     let afterPurchaseCompletionMonth: Int?
     let explanation: String?
 
+    //determines whether an after-purchase scenario exists
     var hasComparison: Bool {
         afterPurchaseResult != nil
     }
 
+    //determines whether earlier months are available
     var canMoveEarlier: Bool {
         visibleStartMonth > 0
     }
 
+    //determines whether later months are available
     var canMoveLater: Bool {
         visibleStartMonth + visibleMonthCount < FinancialCalculator.completionMonthLimit
     }
@@ -60,30 +72,35 @@ nonisolated enum FinancialProjectionError: LocalizedError, Equatable, Sendable {
 nonisolated enum FinancialProjectionBuilder {
     static let defaultVisibleMonthCount = 12
 
-    static func build(
-        inputs: FinancialInputs,
-        purchaseAmountMinor: Int64? = nil,
-        visibleStartMonth: Int = 0,
-        visibleMonthCount: Int = defaultVisibleMonthCount
-    ) -> Result<SavingsProjection, FinancialProjectionError> {
+    //this function accepts financial info, opt. purchase amount, and the window of months to disp
+    static func build(inputs: FinancialInputs, purchaseAmountMinor: Int64? = nil, visibleStartMonth: Int = 0, visibleMonthCount: Int = defaultVisibleMonthCount) -> Result<SavingsProjection, FinancialProjectionError> {
+        
+        
         let normalizedInputs = FinancialInputs(
             savingsMinor: inputs.savingsMinor,
             incomeMinor: inputs.incomeMinor,
             expensesMinor: inputs.expensesMinor,
             targetMinor: inputs.targetMinor,
+            
+            //normalise dates, to make date calculations consistent/avoid timezone-related date shifts
             evaluationDate: FinancialCalendar.utcNoon(for: inputs.evaluationDate, in: FinancialCalendar.gregorianUTC),
             targetDate: FinancialCalendar.utcNoon(for: inputs.targetDate, in: FinancialCalendar.gregorianUTC)
         )
 
+        
+        //calculates baseline (user's original savings info)
         let baseline = FinancialCalculator.evaluate(normalizedInputs)
         guard baseline.status != .invalidInputs else { return .failure(.invalidInputs) }
         guard baseline.status != .overflow else { return .failure(.arithmeticOverflow) }
 
+        //calculate after purcahse (opt.)
         let afterResult: FinancialCalculationResult?
         let afterStartingMinor: Int64?
         if let purchaseAmountMinor {
             guard purchaseAmountMinor > 0 else { return .failure(.invalidPurchaseAmount) }
             guard purchaseAmountMinor <= normalizedInputs.savingsMinor else { return .failure(.insufficientSavings) }
+            
+            //if there is a purchase amount, subtract it from savings
             let remaining = normalizedInputs.savingsMinor.subtractingReportingOverflow(purchaseAmountMinor)
             guard !remaining.overflow else { return .failure(.arithmeticOverflow) }
             afterStartingMinor = remaining.partialValue
@@ -95,6 +112,8 @@ nonisolated enum FinancialProjectionBuilder {
                 evaluationDate: normalizedInputs.evaluationDate,
                 targetDate: normalizedInputs.targetDate
             )
+            
+            //calculate after-purchase version
             let evaluatedAfter = FinancialCalculator.evaluate(afterInputs)
             guard evaluatedAfter.status != .overflow else { return .failure(.arithmeticOverflow) }
             afterResult = evaluatedAfter
@@ -109,6 +128,8 @@ nonisolated enum FinancialProjectionBuilder {
         let capacity = baseline.monthlyCapacityMinor
 
         var samples: [SavingsProjectionSample] = []
+        
+        //loop through the selected months, and calculate balance for each month
         for month in startMonth...endMonth {
             guard let baselineBalance = FinancialCalculator.balance(
                 startingMinor: normalizedInputs.savingsMinor,
@@ -181,6 +202,8 @@ nonisolated enum FinancialProjectionBuilder {
             samples.sort { $0.date < $1.date }
         }
 
+        
+        //package the samples, target, deadline, and calculation results into SavingsProjection and return that
         return .success(
             SavingsProjection(
                 samples: samples,

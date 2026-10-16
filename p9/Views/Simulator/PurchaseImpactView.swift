@@ -25,6 +25,8 @@ struct PurchaseImpactView: View {
     @State private var reminderError: String?
     @State private var isShowingReminderSheet = false
     @State private var customReminderDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    
+    
     @State private var amountDraft = ""
     @State private var amountError: String?
     @State private var sliderValue = 0.0
@@ -142,6 +144,8 @@ struct PurchaseImpactView: View {
     @ViewBuilder
     private var liveProjectionSection: some View {
         if case .live = mode {
+            
+            //includes purchase amount, so FinancialProjectionBuilder builds both basline/after purchase trajectories
             let projection = FinancialProjectionBuilder.build(
                 inputs: projectionInputs,
                 purchaseAmountMinor: evaluation.purchaseAmountMinor,
@@ -688,12 +692,17 @@ struct PurchaseImpactView: View {
         }
     }
 
+    //user moves the slider --> SwiftUI passes the new pos
     private func sliderChanged(_ newValue: Double) {
+        
+        //value is kept within allowed purchase range
         let rounded = min(max(newValue.rounded(), 1), Double(sliderMaximumMinor))
         let minorUnits = Int64(rounded)
         amountDraft = MoneyFormatting.editableText(minorUnits, currencyCode: evaluation.currencyCode)
         sliderValue = rounded
         amountError = nil
+        
+        //inform parent that purchase amount has changed. This connects this view back to SimulatorView
         onAmountChange?(minorUnits)
     }
 
