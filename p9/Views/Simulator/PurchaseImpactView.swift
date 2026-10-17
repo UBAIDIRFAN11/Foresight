@@ -27,6 +27,7 @@ struct PurchaseImpactView: View {
     @State private var customReminderDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
     
     
+    @State private var forecastSession: ForecastSession?
     @State private var amountDraft = ""
     @State private var amountError: String?
     @State private var sliderValue = 0.0
@@ -43,6 +44,11 @@ struct PurchaseImpactView: View {
                 header
                 consequenceCard
                 liveProjectionSection
+                if case .live = mode {
+                    ForecastCallout(isEnabled: canForecast) {
+                        forecastSession = ForecastSession(context: ForecastSource.context(evaluation: evaluation))
+                    }
+                }
                 liveAmountControls
                 purchaseCard
                 goalCard
@@ -96,12 +102,21 @@ struct PurchaseImpactView: View {
                 syncAmountDraft(forceDraftUpdate: true)
             }
         }
+        .sheet(item: $forecastSession) { session in
+            ForecastFlowView(session: session, originIsCurrent: canForecast &&
+                             session.context.purchase?.evaluationID == evaluation.id)
+        }
         .sheet(isPresented: $isShowingReminderSheet) {
             NavigationStack {
                 reminderSetupSheet
             }
             .presentationDetents([.medium, .large])
         }
+    }
+
+    private var canForecast: Bool {
+        guard case .live(let isStale, _) = mode else { return false }
+        return !isStale && amountError == nil && amountDraftMatchesEvaluation
     }
 
     private var header: some View {

@@ -13,6 +13,7 @@ struct GoalDetailView: View {
     @Query private var reminderRecords: [ReminderRecord]
 
     @Bindable var profile: FinancialProfile
+    @State private var forecastSession: ForecastSession?
     @State private var isEditing = false
     @State private var isConfirmingDelete = false
     @State private var errorMessage: String?
@@ -53,6 +54,10 @@ struct GoalDetailView: View {
                         
                         //place the chart on the screen
                         projectionSection(for: goal)
+                        ForecastCallout(isEnabled: true) {
+                            forecastSession = ForecastSession(context: ForecastSource.context(
+                                profile: profile, goal: goal, evaluationDay: today))
+                        }
                         detailRows(for: goal)
                         checkInSection(for: goal)
                         deleteButton
@@ -98,6 +103,9 @@ struct GoalDetailView: View {
                 }
                 .background(ForesightTheme.background)
             }
+        }
+        .sheet(item: $forecastSession) { session in
+            ForecastFlowView(session: session)
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
