@@ -14,7 +14,8 @@ struct GoalsView: View {
     @State private var filter: GoalFilter = .all
     @State private var isAddingGoal = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    private let today = Date()
+    let evaluationDay: Date
+    private var today: Date { evaluationDay }
 
     var body: some View {
         ScrollView {
@@ -72,11 +73,11 @@ struct GoalsView: View {
         }
         .sheet(isPresented: $isAddingGoal) {
             NavigationStack {
-                GoalEditorView(profile: profile, goal: nil)
+                GoalEditorView(profile: profile, goal: nil, evaluationDay: evaluationDay)
             }
         }
         .navigationDestination(for: UUID.self) { id in
-            GoalDetailView(goalID: id, profile: profile)
+            GoalDetailView(goalID: id, profile: profile, evaluationDay: evaluationDay)
         }
     }
 

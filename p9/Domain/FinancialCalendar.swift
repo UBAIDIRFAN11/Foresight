@@ -21,7 +21,9 @@ nonisolated enum FinancialCalendar {
     }
 
     static func utcNoon(for date: Date, in calendar: Calendar = .current) -> Date {
-        let local = calendar.dateComponents([.year, .month, .day], from: date)
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        let local = gregorian.dateComponents([.year, .month, .day], from: date)
         return utcNoon(year: local.year!, month: local.month!, day: local.day!)
     }
 
@@ -33,14 +35,16 @@ nonisolated enum FinancialCalendar {
 
     static func displayDate(fromUTCNoon date: Date, in calendar: Calendar = .current) -> Date {
         let components = gregorianUTC.dateComponents([.year, .month, .day], from: date)
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
         var localComponents = DateComponents()
-        localComponents.calendar = calendar
+        localComponents.calendar = gregorian
         localComponents.timeZone = calendar.timeZone
         localComponents.year = components.year
         localComponents.month = components.month
         localComponents.day = components.day
         localComponents.hour = 12
-        return calendar.date(from: localComponents) ?? date
+        return gregorian.date(from: localComponents) ?? date
     }
 
     static func monthsWithDeposits(from evaluationDate: Date, through targetDate: Date) -> Int {

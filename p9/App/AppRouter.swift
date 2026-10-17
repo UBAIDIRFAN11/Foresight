@@ -10,18 +10,13 @@ final class AppRouter: ObservableObject {
     @Published var historyPath: [UUID] = []
     @Published var simulatorPrefill: SimulatorPrefill?
 
-    private var handledNotificationTokens = Set<String>()
 
     func openSavedDecision(id: UUID, revision: UUID? = nil) {
-        let token = "decision-\(id.uuidString)-\(revision?.uuidString ?? "default")"
-        guard handledNotificationTokens.insert(token).inserted else { return }
         selectedTab = .history
         historyPath = [id]
     }
 
     func openGoal(id: UUID, revision: UUID? = nil) {
-        let token = "goal-\(id.uuidString)-\(revision?.uuidString ?? "default")"
-        guard handledNotificationTokens.insert(token).inserted else { return }
         selectedTab = .goals
         goalPath = [id]
     }
@@ -47,17 +42,29 @@ struct SimulatorPrefill: Equatable {
     init(decision: SavedDecision) {
         token = UUID()
         purchaseName = decision.purchaseName
-        amountMinor = decision.purchaseAmountMinor
-        currencyCode = decision.currencyCode
+        amountMinor = decision.originalPurchaseAmountMinor ?? decision.purchaseAmountMinor
+        currencyCode = decision.originalPurchaseCurrencyCode ?? decision.currencyCode
         preferredGoalID = decision.goalID
     }
 }
 
 enum NotificationRouteBridge {
-    @MainActor static weak var router: AppRouter?
+    @MainActor static weak var router: AppRouter? {
+        didSet {
+            if router != nil, let route = pendingRoute {
+                pendingRoute = nil
+                self.route(kind: route.kind, sourceID: route.sourceID, revision: route.revision)
+            }
+        }
+    }
+    @MainActor private static var pendingRoute: (kind: ReminderKind, sourceID: UUID, revision: UUID?)?
 
     @MainActor
     static func route(kind: ReminderKind, sourceID: UUID, revision: UUID?) {
+        guard router != nil else {
+            pendingRoute = (kind, sourceID, revision)
+            return
+        }
         switch kind {
         case .purchaseReview:
             router?.openSavedDecision(id: sourceID, revision: revision)

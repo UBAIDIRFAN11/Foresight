@@ -70,6 +70,12 @@ struct PurchaseImpactView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if let schedulingError = reminderCoordinator.schedulingError {
+                    Text(schedulingError).font(.footnote).foregroundStyle(ForesightTheme.warning)
+                    Button("Retry Scheduling") {
+                        reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused, requestAuthorizationIfNeeded: true)
+                    }
+                }
                 actions
             }
             .foresightReadableContent()
@@ -108,7 +114,7 @@ struct PurchaseImpactView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if case .saved(let savedAt) = mode {
-                Text("Saved \(formatted(savedAt))")
+                Text("Saved \(savedAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -134,6 +140,9 @@ struct PurchaseImpactView: View {
                 .font(.headline)
             if case .saved = mode {
                 AdaptiveValueRow(title: "Amount", value: MoneyFormatting.display(evaluation.purchaseAmountMinor, currencyCode: evaluation.currencyCode))
+            }
+            if let conversion = evaluation.conversion {
+                ConversionSummary(conversion: conversion, convertedMinor: evaluation.purchaseAmountMinor)
             }
             AdaptiveValueRow(title: "Remaining savings", value: MoneyFormatting.display(evaluation.result.remainingSavingsMinor, currencyCode: evaluation.currencyCode))
             AdaptiveValueRow(title: "Currency", value: evaluation.currencyCode)
@@ -195,7 +204,7 @@ struct PurchaseImpactView: View {
                     .font(.headline)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Exact amount")
+                    Text("Exact amount (\(evaluation.originalCurrencyCode))")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     TextField("0", text: amountDraftBinding)
@@ -207,18 +216,18 @@ struct PurchaseImpactView: View {
                 if canUseSlider {
                     Slider(
                         value: sliderBinding,
-                        in: 1...Double(sliderMaximumMinor),
+                        in: Double(sliderMinimumMinor)...Double(sliderMaximumMinor),
                         step: 1
                     )
                     HStack {
-                        Text(MoneyFormatting.display(1, currencyCode: evaluation.currencyCode))
+                        Text(MoneyFormatting.display(sliderMinimumMinor, currencyCode: evaluation.originalCurrencyCode))
                         Spacer()
-                        Text(MoneyFormatting.display(sliderMaximumMinor, currencyCode: evaluation.currencyCode))
+                        Text(MoneyFormatting.display(sliderMaximumMinor, currencyCode: evaluation.originalCurrencyCode))
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 } else {
-                    Text("Use the exact amount field for very large balances.")
+                    Text("Use the exact amount field for amounts outside the safe slider range.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -279,7 +288,11 @@ struct PurchaseImpactView: View {
             .disabled(isStale || savedDecision != nil || amountError != nil || !amountDraftMatchesEvaluation)
 
             Button {
-                isShowingReminderSheet = true
+                do {
+                    try SavedDecisionStore.validateLive(evaluation, in: modelContext)
+                    saveError = nil
+                    isShowingReminderSheet = true
+                } catch { saveError = error.localizedDescription }
             } label: {
                 Label("Save & Remind Me", systemImage: "bell.badge")
                     .font(.headline)
@@ -290,16 +303,18 @@ struct PurchaseImpactView: View {
             .controlSize(.large)
             .disabled(isStale || amountError != nil || !amountDraftMatchesEvaluation)
 
-            Button {
-                onAdjust?()
-            } label: {
-                Label("Adjust Purchase", systemImage: "slider.horizontal.3")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .fixedSize(horizontal: false, vertical: true)
+            if isStale {
+                Button {
+                    onAdjust?()
+                } label: {
+                    Label("Recalculate Purchase", systemImage: "arrow.clockwise")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
         }
     }
 
@@ -372,6 +387,9 @@ struct PurchaseImpactView: View {
                 reminderOptionButton("In 7 Days", date: Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date().addingTimeInterval(604_800))
             }
 
+            if let reminderError {
+                Section { Text(reminderError).foregroundStyle(ForesightTheme.warning) }
+            }
             Section("Custom") {
                 DatePicker(
                     "Date and Time",
@@ -453,7 +471,7 @@ struct PurchaseImpactView: View {
         guard amountError == nil, amountDraftMatchesEvaluation else { return }
         do {
             // SavedDecisionStore handles duplicate prevention and rollback.
-            let decision = try SavedDecisionStore.save(evaluation, in: modelContext)
+            let decision = try SavedDecisionStore.saveLive(evaluation, in: modelContext)
             savedDecision = decision
             saveError = nil
             onSaved?(decision)
@@ -464,8 +482,11 @@ struct PurchaseImpactView: View {
 
     @discardableResult
     private func ensureSavedDecision() throws -> SavedDecision {
-        if let savedDecision {
-            return savedDecision
+        if case .live = mode {
+            guard amountError == nil, amountDraftMatchesEvaluation else { throw PurchaseImpactError.invalidPurchaseAmount }
+            let decision = try SavedDecisionStore.saveLive(evaluation, in: modelContext)
+            savedDecision = decision
+            return decision
         }
         if let currentDecision {
             savedDecision = currentDecision
@@ -474,19 +495,26 @@ struct PurchaseImpactView: View {
         let decision = try SavedDecisionStore.save(evaluation, in: modelContext)
         savedDecision = decision
         saveError = nil
-        onSaved?(decision)
         return decision
     }
 
     private func saveReminder(for date: Date) {
         do {
-            let decision = try ensureSavedDecision()
-            _ = try ReminderStore.upsertPurchaseReminder(for: decision, deliveryDate: date, in: modelContext)
+            let decision: SavedDecision
+            if case .live = mode {
+                guard amountError == nil, amountDraftMatchesEvaluation else { throw PurchaseImpactError.invalidPurchaseAmount }
+                decision = try ReminderStore.saveLivePurchaseReminder(evaluation: evaluation, deliveryDate: date, in: modelContext)
+                savedDecision = decision
+            } else {
+                decision = try ensureSavedDecision()
+                _ = try ReminderStore.upsertPurchaseReminder(for: decision, deliveryDate: date, in: modelContext)
+            }
             reminderError = nil
             isShowingReminderSheet = false
             reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused, requestAuthorizationIfNeeded: true)
+            if case .live = mode { onSaved?(decision) }
         } catch {
-            reminderError = error.localizedDescription
+            reminderError = currentDecision == nil ? error.localizedDescription : "Decision saved. Reminder was not saved: \(error.localizedDescription) Retry here; the decision will not be duplicated."
         }
     }
 
@@ -523,8 +551,8 @@ struct PurchaseImpactView: View {
 
     private var reminderStatusText: String {
         if let activeReminder, let date = activeReminder.deliveryDate {
-            let suffix = remindersPaused ? " Paused in Settings." : ""
-            return "Scheduled for \(date.formatted(date: .abbreviated, time: .shortened)).\(suffix)"
+            let status = reminderCoordinator.status(for: activeReminder, globallyPaused: remindersPaused)
+            return "\(status) · \(date.formatted(date: .abbreviated, time: .shortened))"
         }
         if purchaseReminder?.isReviewed == true {
             return "Reviewed. No pending reminder."
@@ -625,16 +653,23 @@ struct PurchaseImpactView: View {
         )
     }
 
-    private var sliderSafetyMaximum: Int64 {
-        9_000_000_000_000_000
+    private var sliderBounds: ClosedRange<Int64>? {
+        CurrencyConversion.sliderBounds(
+            from: CurrencyDefinition.definition(for: evaluation.originalCurrencyCode),
+            to: CurrencyDefinition.definition(for: evaluation.currencyCode),
+            rate: evaluation.conversion?.exchangeRate.rate ?? 1,
+            availableSavings: evaluation.originalSavingsMinor
+        )
     }
 
-    private var sliderMaximumMinor: Int64 {
-        min(evaluation.originalSavingsMinor, sliderSafetyMaximum)
-    }
+    private var sliderMinimumMinor: Int64 { sliderBounds?.lowerBound ?? 1 }
+    private var sliderMaximumMinor: Int64 { sliderBounds?.upperBound ?? 1 }
 
     private var canUseSlider: Bool {
-        sliderMaximumMinor >= 1
+        guard let bounds = sliderBounds else { return false }
+        return bounds.lowerBound < bounds.upperBound &&
+            bounds.upperBound <= 9_007_199_254_740_991 &&
+            bounds.contains(evaluation.originalAmountMinor)
     }
 
     private var amountDraftBinding: Binding<String> {
@@ -646,46 +681,36 @@ struct PurchaseImpactView: View {
 
     private var sliderBinding: Binding<Double> {
         Binding(
-            get: { min(max(sliderValue, 1), Double(sliderMaximumMinor)) },
+            get: { min(max(sliderValue, Double(sliderMinimumMinor)), Double(sliderMaximumMinor)) },
             set: { sliderChanged($0) }
         )
     }
 
     private var amountDraftMatchesEvaluation: Bool {
-        let currency = CurrencyDefinition.definition(for: evaluation.currencyCode)
+        let currency = CurrencyDefinition.definition(for: evaluation.originalCurrencyCode)
         guard let parsed = try? MoneyFormatting.parseMinorUnits(amountDraft, currency: currency),
-              parsed > 0,
-              parsed <= evaluation.originalSavingsMinor else { return false }
-        return parsed == evaluation.purchaseAmountMinor
+              (try? evaluation.convertedCost(for: parsed)) != nil else { return false }
+        return parsed == evaluation.originalAmountMinor
     }
 
     private func syncAmountDraft(forceDraftUpdate: Bool = false) {
         // Evaluation updates acknowledge the user's input; only an explicit
         // formatting event should replace the text they are still editing.
         if forceDraftUpdate {
-            amountDraft = MoneyFormatting.editableText(evaluation.purchaseAmountMinor, currencyCode: evaluation.currencyCode)
+            amountDraft = MoneyFormatting.editableText(evaluation.originalAmountMinor, currencyCode: evaluation.originalCurrencyCode)
             amountError = nil
         }
-        sliderValue = Double(min(evaluation.purchaseAmountMinor, sliderMaximumMinor))
+        if canUseSlider { sliderValue = Double(evaluation.originalAmountMinor) }
     }
 
     private func amountDraftChanged(_ newValue: String) {
         amountDraft = newValue
-        let currency = CurrencyDefinition.definition(for: evaluation.currencyCode)
+        let currency = CurrencyDefinition.definition(for: evaluation.originalCurrencyCode)
         do {
             let parsed = try MoneyFormatting.parseMinorUnits(newValue, currency: currency)
-            guard parsed > 0 else {
-                amountError = "Purchase amount must be greater than zero."
-                return
-            }
-            guard parsed <= evaluation.originalSavingsMinor else {
-                amountError = "This purchase is higher than your current savings."
-                return
-            }
+            _ = try evaluation.convertedCost(for: parsed)
             amountError = nil
-            if parsed <= sliderMaximumMinor {
-                sliderValue = Double(parsed)
-            }
+            if canUseSlider { sliderValue = Double(parsed) }
             onAmountChange?(parsed)
         } catch {
             amountError = error.localizedDescription
@@ -694,14 +719,15 @@ struct PurchaseImpactView: View {
 
     //user moves the slider --> SwiftUI passes the new pos
     private func sliderChanged(_ newValue: Double) {
-        
+        guard canUseSlider, newValue.isFinite else { return }
+
         //value is kept within allowed purchase range
-        let rounded = min(max(newValue.rounded(), 1), Double(sliderMaximumMinor))
+        let rounded = min(max(newValue.rounded(), Double(sliderMinimumMinor)), Double(sliderMaximumMinor))
         let minorUnits = Int64(rounded)
-        amountDraft = MoneyFormatting.editableText(minorUnits, currencyCode: evaluation.currencyCode)
+        amountDraft = MoneyFormatting.editableText(minorUnits, currencyCode: evaluation.originalCurrencyCode)
         sliderValue = rounded
         amountError = nil
-        
+
         //inform parent that purchase amount has changed. This connects this view back to SimulatorView
         onAmountChange?(minorUnits)
     }
@@ -777,5 +803,23 @@ struct PurchaseImpactView: View {
             return evaluation.evaluationDate
         }
         return nil
+    }
+}
+
+private struct ConversionSummary: View {
+    let conversion: PurchaseConversion
+    let convertedMinor: Int64
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            AdaptiveValueRow(title: "Original price", value: MoneyFormatting.display(conversion.originalAmountMinor, currencyCode: conversion.exchangeRate.base, includeCode: true))
+            AdaptiveValueRow(title: "Converted cost", value: MoneyFormatting.display(convertedMinor, currencyCode: conversion.exchangeRate.quote, includeCode: true))
+            Text("1 \(conversion.exchangeRate.base) = \(conversion.exchangeRate.rateString) \(conversion.exchangeRate.quote)")
+                .font(.footnote)
+            Text("Dated exchange-rate information · \(FinancialCalendar.displayDate(fromUTCNoon: conversion.exchangeRate.observationDate).formatted(date: .abbreviated, time: .omitted))")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

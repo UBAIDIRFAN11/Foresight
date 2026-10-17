@@ -8,13 +8,7 @@ struct SettingsView: View {
         List {
             Section {
                 NavigationLink {
-                    FinancialProfileView(mode: .editing(profile))
-                } label: {
-                    Label("Financial Profile", systemImage: "person.text.rectangle")
-                }
-
-                NavigationLink {
-                    ProfileView()
+                    ProfileView(profile: profile)
                 } label: {
                     Label("Profile", systemImage: "person.crop.circle")
                 }

@@ -3,6 +3,45 @@ import SwiftData
 
 @MainActor
 enum FinancialProfilePolicy {
+    static func saveFocusPreference(
+        _ id: UUID?, for profile: FinancialProfile, in context: ModelContext,
+        save: (() throws -> Void)? = nil
+    ) throws {
+        let previousID = profile.preferredFocusGoalID
+        profile.preferredFocusGoalID = id
+        do {
+            if let save { try save() } else { try context.save() }
+        } catch {
+            context.rollback()
+            profile.preferredFocusGoalID = previousID
+            throw error
+        }
+    }
+
+    static func deleteGoal(
+        _ goal: FinancialGoal, in context: ModelContext,
+        save: (() throws -> Void)? = nil
+    ) throws {
+        let profiles = try context.fetch(FetchDescriptor<FinancialProfile>())
+        let previousPreferences = profiles.map { ($0, $0.preferredFocusGoalID) }
+        do {
+            for profile in profiles where profile.preferredFocusGoalID == goal.id {
+                profile.preferredFocusGoalID = nil
+            }
+            let reminders = try context.fetch(FetchDescriptor<ReminderRecord>())
+            for reminder in reminders where reminder.kind == .goalCheckIn && reminder.sourceID == goal.id {
+                context.delete(reminder)
+            }
+            context.delete(goal)
+            if let save { try save() } else { try context.save() }
+        } catch {
+            context.rollback()
+            // Restore values held by mounted views as well as rolling back storage.
+            for (profile, id) in previousPreferences { profile.preferredFocusGoalID = id }
+            throw error
+        }
+    }
+
     static func fetchProfiles(in context: ModelContext) throws -> [FinancialProfile] {
         var descriptor = FetchDescriptor<FinancialProfile>(
             sortBy: [

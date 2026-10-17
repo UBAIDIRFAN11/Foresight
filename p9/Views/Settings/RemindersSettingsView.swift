@@ -15,7 +15,13 @@ struct RemindersSettingsView: View {
     var body: some View {
         List {
             Section {
-                Toggle("Pause All Reminders", isOn: $remindersPaused)
+                Toggle("Pause All Reminders", isOn: Binding(
+                    get: { remindersPaused },
+                    set: {
+                        remindersPaused = $0
+                        reminderCoordinator.reconcile(in: modelContext, globallyPaused: $0, requestAuthorizationIfNeeded: !$0)
+                    }
+                ))
                 AdaptiveValueRow(title: "Permission", value: reminderCoordinator.deliverySettings.summary)
                 if reminderCoordinator.deliverySettings.permissionState == .denied {
                     Button {
@@ -24,8 +30,6 @@ struct RemindersSettingsView: View {
                         Label("Open iOS Settings", systemImage: "gearshape")
                     }
                 }
-            } footer: {
-                Text("Paused reminders stay saved locally and are restored when you resume them. Foresight stores reminder intent; iOS pending notifications are rebuilt from that saved state.")
             }
 
             Section("Configured Reminders") {
@@ -38,6 +42,14 @@ struct RemindersSettingsView: View {
                 }
             }
 
+            if let schedulingError = reminderCoordinator.schedulingError {
+                Section {
+                    Text(schedulingError).foregroundStyle(ForesightTheme.warning)
+                    Button("Retry Scheduling") {
+                        reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused, requestAuthorizationIfNeeded: true)
+                    }
+                }
+            }
             if let errorMessage {
                 Section {
                     Label(errorMessage, systemImage: "exclamationmark.triangle")
@@ -49,9 +61,6 @@ struct RemindersSettingsView: View {
         .background(ForesightTheme.background)
         .navigationTitle("Reminders")
         .onAppear {
-            reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
-        }
-        .onChange(of: remindersPaused) { _, _ in
             reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
         }
     }
@@ -107,22 +116,7 @@ struct RemindersSettingsView: View {
     }
 
     private func status(for reminder: ReminderRecord) -> String {
-        if reminder.isReviewed {
-            return "Reviewed"
-        }
-        if !reminder.isEnabled {
-            return "Off"
-        }
-        if remindersPaused {
-            return "Paused"
-        }
-        if reminderCoordinator.deliverySettings.permissionState == .denied {
-            return "Blocked"
-        }
-        if reminderCoordinator.scheduledRequestIDs.contains(reminder.requestIdentifier) {
-            return "Scheduled"
-        }
-        return "Saved"
+        reminderCoordinator.status(for: reminder, globallyPaused: remindersPaused)
     }
 
     private func statusColor(for reminder: ReminderRecord) -> Color {

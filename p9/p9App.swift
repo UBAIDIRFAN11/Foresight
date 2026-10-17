@@ -13,11 +13,15 @@ import SwiftData
 @main
 struct p9App: App {
     @UIApplicationDelegateAdaptor(ForesightAppDelegate.self) private var appDelegate
-    @StateObject private var router = AppRouter()
-    @StateObject private var reminderCoordinator = ReminderCoordinator(notificationClient: SystemNotificationClient())
+    @StateObject private var router: AppRouter
+    @StateObject private var reminderCoordinator: ReminderCoordinator
     private let modelContainer: ModelContainer
 
     init() {
+        let router = AppRouter()
+        let coordinator = ReminderCoordinator(notificationClient: SystemNotificationClient())
+        _router = StateObject(wrappedValue: router)
+        _reminderCoordinator = StateObject(wrappedValue: coordinator)
         do {
             //creates SwiftData ModelContainer. it register: FinancialProfile, FinancialGoal, SavedDecision persistant models.
             let schema = Schema([FinancialProfile.self, FinancialGoal.self, SavedDecision.self, ReminderRecord.self])
@@ -25,6 +29,8 @@ struct p9App: App {
             modelContainer = try ModelContainer(for: schema, configurations: [configuration])
 
             modelContainer.mainContext.autosaveEnabled = false
+            NotificationRouteBridge.router = router
+            NotificationActionBridge.shared.configure(context: modelContainer.mainContext, coordinator: coordinator)
         } catch {
             fatalError("Unable to create Foresight model container: \(error)")
         }
@@ -36,11 +42,6 @@ struct p9App: App {
                 .modelContainer(modelContainer)
                 .environmentObject(router)
                 .environmentObject(reminderCoordinator)
-                .task {
-                    await MainActor.run {
-                        NotificationRouteBridge.router = router
-                    }
-                }
         }
     }
 }

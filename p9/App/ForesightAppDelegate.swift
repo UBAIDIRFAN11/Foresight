@@ -2,6 +2,7 @@
 // into the SwiftUI router without putting financial logic in the app delegate.
 import UIKit
 import UserNotifications
+import SwiftData
 
 final class ForesightAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
@@ -16,12 +17,14 @@ final class ForesightAppDelegate: NSObject, UIApplicationDelegate, UNUserNotific
             options: []
         )
         let category = UNNotificationCategory(
-            identifier: ReminderNotificationConstants.categoryIdentifier,
+            identifier: ReminderNotificationConstants.purchaseCategoryIdentifier,
             actions: [remindTomorrow],
             intentIdentifiers: [],
             options: []
         )
-        center.setNotificationCategories([category])
+        let goalCategory = UNNotificationCategory(identifier: ReminderNotificationConstants.goalCategoryIdentifier,
+                                                   actions: [], intentIdentifiers: [], options: [])
+        center.setNotificationCategories([category, goalCategory])
         return true
     }
 
@@ -41,10 +44,11 @@ final class ForesightAppDelegate: NSObject, UIApplicationDelegate, UNUserNotific
         }
 
         if response.actionIdentifier == ReminderNotificationConstants.remindTomorrowAction {
-            await NotificationActionBridge.shared.enqueueRemindTomorrow(payload: payload)
+            await NotificationActionBridge.shared.handleRemindTomorrow(payload: payload)
             return
         }
 
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
         await MainActor.run {
             NotificationRouteBridge.route(
                 kind: payload.kind,
@@ -77,17 +81,30 @@ struct ReminderNotificationPayload {
     }
 }
 
-actor NotificationActionBridge {
+@MainActor
+final class NotificationActionBridge {
     static let shared = NotificationActionBridge()
-    private var pendingPayloads: [ReminderNotificationPayload] = []
+    private var context: ModelContext?
+    private var coordinator: ReminderCoordinator?
 
-    func enqueueRemindTomorrow(payload: ReminderNotificationPayload) {
-        pendingPayloads.append(payload)
+    func configure(context: ModelContext, coordinator: ReminderCoordinator) {
+        self.context = context
+        self.coordinator = coordinator
     }
 
-    func consumePendingPayloads() -> [ReminderNotificationPayload] {
-        let payloads = pendingPayloads
-        pendingPayloads.removeAll()
-        return payloads
+    func handleRemindTomorrow(
+        payload: ReminderNotificationPayload, now: Date = Date(), calendar: Calendar = .current,
+        globallyPaused: Bool? = nil
+    ) async {
+        guard payload.kind == .purchaseReview, let context, let coordinator else { return }
+        do {
+            if try ReminderStore.snooze(sourceID: payload.sourceID, revision: payload.revision,
+                                        in: context, now: now, calendar: calendar) {
+                await coordinator.reconcileAndWait(in: context,
+                    globallyPaused: globallyPaused ?? UserDefaults.standard.bool(forKey: "remindersPaused"))
+            }
+        } catch {
+            coordinator.reportActionError(error)
+        }
     }
 }

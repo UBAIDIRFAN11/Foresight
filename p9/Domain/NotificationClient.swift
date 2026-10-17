@@ -51,7 +51,9 @@ protocol NotificationClient {
     func requestAuthorization() async throws -> Bool
     func pendingRequests() async -> [String]
     func schedule(_ reminder: PlannedReminder) async throws
-    func remove(requestIdentifiers: [String]) async
+    func deliveredRequests() async -> [String]
+    func removePending(requestIdentifiers: [String]) async
+    func removeDelivered(requestIdentifiers: [String]) async
     func openSettings()
 }
 
@@ -95,7 +97,7 @@ struct SystemNotificationClient: NotificationClient {
         content.title = reminder.title
         content.body = reminder.body
         content.sound = .default
-        content.categoryIdentifier = ReminderNotificationConstants.categoryIdentifier
+        content.categoryIdentifier = reminder.kind == .purchaseReview ? ReminderNotificationConstants.purchaseCategoryIdentifier : ReminderNotificationConstants.goalCategoryIdentifier
         content.userInfo = [
             ReminderNotificationConstants.kindKey: reminder.kind.rawValue,
             ReminderNotificationConstants.sourceIDKey: reminder.sourceID.uuidString,
@@ -120,8 +122,15 @@ struct SystemNotificationClient: NotificationClient {
         try await center.add(request)
     }
 
-    func remove(requestIdentifiers: [String]) async {
+    func deliveredRequests() async -> [String] {
+        await center.deliveredNotifications().map { $0.request.identifier }
+    }
+
+    func removePending(requestIdentifiers: [String]) async {
         center.removePendingNotificationRequests(withIdentifiers: requestIdentifiers)
+    }
+
+    func removeDelivered(requestIdentifiers: [String]) async {
         center.removeDeliveredNotifications(withIdentifiers: requestIdentifiers)
     }
 
@@ -133,7 +142,8 @@ struct SystemNotificationClient: NotificationClient {
 
 enum ReminderNotificationConstants {
     static let namespacePrefix = "foresight.reminder."
-    static let categoryIdentifier = "FORESIGHT_REMINDER"
+    static let purchaseCategoryIdentifier = "FORESIGHT_PURCHASE_REMINDER"
+    static let goalCategoryIdentifier = "FORESIGHT_GOAL_REMINDER"
     static let remindTomorrowAction = "FORESIGHT_REMIND_TOMORROW"
     static let kindKey = "kind"
     static let sourceIDKey = "sourceID"

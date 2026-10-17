@@ -14,9 +14,11 @@ struct MainTabView: View {
     //financial profile is passed into the whole app, as several parts of the app need access to it.
     @Bindable var profile: FinancialProfile
     let duplicateProfileCount: Int
+    let evaluationDay: Date
     @EnvironmentObject private var router: AppRouter
     // When Home opens the simulator, this carries the focused goal across tabs.
     @State private var simulatorGoalID: UUID?
+    @State private var simulatorGoalRequestID: UUID?
 
     var body: some View {
         TabView(selection: $router.selectedTab) {
@@ -24,9 +26,11 @@ struct MainTabView: View {
                 HomeView(
                     profile: profile,
                     duplicateProfileCount: duplicateProfileCount,
+                    evaluationDay: evaluationDay,
                     onEvaluatePurchase: { goalID in
                         //jump straight to Simulator with Home's focused goal selected.
                         simulatorGoalID = goalID
+                        simulatorGoalRequestID = UUID()
                         router.selectedTab = .simulator
                     }
                 )
@@ -37,7 +41,7 @@ struct MainTabView: View {
             .tag(AppTab.home)
 
             NavigationStack(path: $router.goalPath) {
-                GoalsView(profile: profile)
+                GoalsView(profile: profile, evaluationDay: evaluationDay)
             }
             .tabItem {
                 Label("Goals", systemImage: "flag")
@@ -47,7 +51,9 @@ struct MainTabView: View {
             NavigationStack {
                 SimulatorView(
                     profile: profile,
+                    evaluationDay: evaluationDay,
                     initialGoalID: simulatorGoalID,
+                    goalSelectionRequestID: simulatorGoalRequestID,
                     prefill: router.simulatorPrefill,
                     onPrefillConsumed: { token in
                         router.consumeSimulatorPrefill(token: token)

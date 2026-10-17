@@ -7,10 +7,12 @@ struct GoalEditorView: View {
 
     @Bindable var profile: FinancialProfile
     let goal: FinancialGoal?
+    let evaluationDay: Date
 
+    @State private var priority: GoalPriority = .medium
     @State private var name = ""
     @State private var targetAmount = ""
-    @State private var targetDate = FinancialCalendar.clampedAnniversary(from: Date(), addingMonths: 6)
+    @State private var targetDate = Date.distantFuture
     @State private var goalDescription = ""
     @State private var errorMessage: String?
     @State private var loaded = false
@@ -30,6 +32,11 @@ struct GoalEditorView: View {
                         .keyboardType(.decimalPad)
                         .focused($focusedField, equals: .targetAmount)
                         .multilineTextAlignment(.trailing)
+                }
+                Picker("Priority", selection: $priority) {
+                    ForEach(GoalPriority.allCases) { priority in
+                        Text(priority.title).tag(priority)
+                    }
                 }
                 DatePicker("Target date", selection: $targetDate, displayedComponents: .date)
                 TextField("Description", text: $goalDescription, axis: .vertical)
@@ -71,7 +78,11 @@ struct GoalEditorView: View {
         // Load existing goal values once when editing; new goals keep the defaults.
         guard !loaded else { return }
         loaded = true
-        guard let goal else { return }
+        guard let goal else {
+            targetDate = FinancialCalendar.displayDate(fromUTCNoon: FinancialCalendar.clampedAnniversary(from: evaluationDay, addingMonths: 6))
+            return
+        }
+        priority = goal.priority
         name = goal.name
         targetAmount = MoneyFormatting.editableText(goal.targetAmountMinor, currencyCode: profile.preferredCurrencyCode)
         targetDate = FinancialCalendar.displayDate(fromUTCNoon: goal.targetDate)
@@ -94,6 +105,7 @@ struct GoalEditorView: View {
 
             if let goal {
                 // Editing mutates the existing SwiftData model.
+                goal.priority = priority
                 goal.name = cleanedName
                 goal.targetAmountMinor = target
                 goal.targetDate = FinancialCalendar.utcNoon(for: targetDate)
@@ -105,7 +117,8 @@ struct GoalEditorView: View {
                         name: cleanedName,
                         targetAmountMinor: target,
                         targetDate: targetDate,
-                        goalDescription: FinancialFormValidation.optionalDescription(goalDescription)
+                        goalDescription: FinancialFormValidation.optionalDescription(goalDescription),
+                        priority: priority
                     )
                 )
             }

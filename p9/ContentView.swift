@@ -15,6 +15,7 @@ struct ContentView: View {
     @EnvironmentObject private var reminderCoordinator: ReminderCoordinator
     @AppStorage("remindersPaused") private var remindersPaused = false
     @Environment(\.scenePhase) private var scenePhase
+    @State private var evaluationDay = FinancialCalendar.localEvaluationDay()
     @State private var loadState: LoadState = .loading
 
     var body: some View {
@@ -64,25 +65,23 @@ struct ContentView: View {
                 
             //if profile already exists, open maintabview
             case .ready(let profile, let duplicateCount):
-                MainTabView(profile: profile, duplicateProfileCount: duplicateCount)
+                MainTabView(profile: profile, duplicateProfileCount: duplicateCount, evaluationDay: evaluationDay)
             }
         }
         .task {
+            evaluationDay = FinancialCalendar.localEvaluationDay()
             loadProfile()
             reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
-            await applyPendingNotificationActions()
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
+            evaluationDay = FinancialCalendar.localEvaluationDay()
             loadProfile()
             reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
-            Task {
-                await applyPendingNotificationActions()
-            }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
-            reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
-        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in refreshDay() }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in refreshDay() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in refreshDay() }
     }
 
     private func loadProfile() {
@@ -100,27 +99,9 @@ struct ContentView: View {
         }
     }
 
-    private func applyPendingNotificationActions() async {
-        let payloads = await NotificationActionBridge.shared.consumePendingPayloads()
-        for payload in payloads {
-            guard payload.kind == .purchaseReview else { continue }
-            do {
-                guard let record = try ReminderStore.existing(kind: .purchaseReview, sourceID: payload.sourceID, in: modelContext),
-                      record.scheduleRevision == payload.revision else {
-                    continue
-                }
-                let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date().addingTimeInterval(86_400)
-                record.deliveryDate = tomorrow
-                record.isEnabled = true
-                record.reviewedAt = nil
-                record.scheduleRevision = UUID()
-                record.updatedAt = Date()
-                try modelContext.save()
-                reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused, requestAuthorizationIfNeeded: true)
-            } catch {
-                modelContext.rollback()
-            }
-        }
+    private func refreshDay() {
+        evaluationDay = FinancialCalendar.localEvaluationDay()
+        reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
     }
 }
 

@@ -59,6 +59,9 @@ struct GoalCard: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    Text("\(goal.priority.title) priority")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     if let goalDescription = goal.goalDescription {
                         Text(goalDescription)
                             .font(.caption)

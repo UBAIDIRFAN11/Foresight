@@ -14,13 +14,25 @@ final class ReminderCoordinator: ObservableObject {
     )
     @Published private(set) var schedulingError: String?
     @Published private(set) var scheduledRequestIDs: Set<String> = []
+    @Published private(set) var failedRequestIDs: Set<String> = []
 
     private let notificationClient: NotificationClient
-    private var isReconciling = false
-    private var needsAnotherRun = false
+    private let now: () -> Date
+    private let calendar: () -> Calendar
+    private var latestRequest: (context: ModelContext, paused: Bool)?
+    private var authorizationRequested = false
+    private var generation = 0
+    private var worker: Task<Void, Never>?
+    private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    init(notificationClient: NotificationClient) {
+    init(
+        notificationClient: NotificationClient,
+        now: @escaping () -> Date = Date.init,
+        calendar: @escaping () -> Calendar = { .current }
+    ) {
         self.notificationClient = notificationClient
+        self.now = now
+        self.calendar = calendar
     }
 
     func reconcile(
@@ -28,12 +40,31 @@ final class ReminderCoordinator: ObservableObject {
         globallyPaused: Bool,
         requestAuthorizationIfNeeded: Bool = false
     ) {
-        Task { @MainActor in
-            await reconcileNow(
-                in: context,
-                globallyPaused: globallyPaused,
-                requestAuthorizationIfNeeded: requestAuthorizationIfNeeded
-            )
+        enqueue(context: context, paused: globallyPaused, authorize: requestAuthorizationIfNeeded)
+    }
+
+    func reconcileAndWait(in context: ModelContext, globallyPaused: Bool, requestAuthorizationIfNeeded: Bool = false) async {
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+            enqueue(context: context, paused: globallyPaused, authorize: requestAuthorizationIfNeeded)
+        }
+    }
+
+    private func enqueue(context: ModelContext, paused: Bool, authorize: Bool) {
+        latestRequest = (context, paused)
+        authorizationRequested = authorizationRequested || authorize
+        generation += 1
+        guard worker == nil else { return }
+        worker = Task { @MainActor in
+            while let request = latestRequest {
+                let pass = generation
+                await runReconciliation(in: request.context, globallyPaused: request.paused, generation: pass)
+                if pass == generation { break }
+            }
+            worker = nil
+            let completed = waiters
+            waiters.removeAll()
+            for continuation in completed { continuation.resume() }
         }
     }
 
@@ -41,88 +72,103 @@ final class ReminderCoordinator: ObservableObject {
         notificationClient.openSettings()
     }
 
-    private func reconcileNow(
-        in context: ModelContext,
-        globallyPaused: Bool,
-        requestAuthorizationIfNeeded: Bool
-    ) async {
-        if isReconciling {
-            needsAnotherRun = true
-            return
-        }
-
-        isReconciling = true
-        repeat {
-            needsAnotherRun = false
-            await runReconciliation(
-                in: context,
-                globallyPaused: globallyPaused,
-                requestAuthorizationIfNeeded: requestAuthorizationIfNeeded
-            )
-        } while needsAnotherRun
-        isReconciling = false
+    func reportActionError(_ error: Error) {
+        schedulingError = error.localizedDescription
     }
 
-    private func runReconciliation(
-        in context: ModelContext,
-        globallyPaused: Bool,
-        requestAuthorizationIfNeeded: Bool
-    ) async {
+    func status(for reminder: ReminderRecord, globallyPaused: Bool) -> String {
+        if reminder.isReviewed { return "Reviewed" }
+        if !reminder.isEnabled { return "Off" }
+        if globallyPaused { return "Paused" }
+        if deliverySettings.permissionState == .denied { return "Blocked" }
+        if reminder.kind == .purchaseReview, let date = reminder.deliveryDate, date <= now() { return "Review due" }
+        if failedRequestIDs.contains(reminder.requestIdentifier) { return "Failed" }
+        if scheduledRequestIDs.contains(reminder.requestIdentifier) { return "Scheduled" }
+        return "Saved"
+    }
+
+    private func runReconciliation(in context: ModelContext, globallyPaused: Bool, generation pass: Int) async {
         deliverySettings = await notificationClient.deliverySettings()
-        if requestAuthorizationIfNeeded, deliverySettings.permissionState == .notDetermined {
-            do {
-                _ = try await notificationClient.requestAuthorization()
-                deliverySettings = await notificationClient.deliverySettings()
-            } catch {
-                schedulingError = "Could not request notification permission. \(error.localizedDescription)"
-                return
+        guard pass == generation else { return }
+        var errors: [String] = []
+        if !globallyPaused, authorizationRequested {
+            authorizationRequested = false
+            if deliverySettings.permissionState == .notDetermined {
+                do {
+                    _ = try await notificationClient.requestAuthorization()
+                    deliverySettings = await notificationClient.deliverySettings()
+                } catch { errors.append("Could not request notification permission. \(error.localizedDescription)") }
             }
         }
-
+        guard pass == generation else { return }
         do {
             let records = try context.fetch(FetchDescriptor<ReminderRecord>())
             let decisions = try context.fetch(FetchDescriptor<SavedDecision>())
             let goals = try context.fetch(FetchDescriptor<FinancialGoal>())
-
             let decisionIDs = Set(decisions.map(\.evaluationID))
             let goalIDs = Set(goals.map(\.id))
-            let snapshots = records.map { record in
-                ReminderSnapshot(
-                    record: record,
-                    title: title(for: record, decisions: decisions, goals: goals),
-                    body: body(for: record, decisions: decisions, goals: goals)
-                )
+            let planner = ReminderPlanner(now: now, calendar: calendar())
+            var planned: [PlannedReminder] = []
+            var failed: Set<String> = []
+            if !globallyPaused {
+                for record in records {
+                    let snapshot = ReminderSnapshot(
+                        record: record,
+                        title: title(for: record, decisions: decisions, goals: goals),
+                        body: body(for: record, decisions: decisions, goals: goals)
+                    )
+                    do {
+                        if let item = try planner.plan(snapshot: snapshot, validGoalIDs: goalIDs, validSavedDecisionIDs: decisionIDs) {
+                            if planned.count < ReminderPlanner.maximumScheduledReminders {
+                                planned.append(item)
+                            } else { throw ReminderPlanningError.capacityExceeded }
+                        }
+                    } catch {
+                        failed.insert(record.requestIdentifier)
+                        errors.append(error.localizedDescription)
+                    }
+                }
             }
-
-            let planner = ReminderPlanner()
-            let planned = try planner.plan(
-                snapshots: snapshots,
-                validGoalIDs: goalIDs,
-                validSavedDecisionIDs: decisionIDs,
-                globallyPaused: globallyPaused
-            )
-
             let pending = Set(await notificationClient.pendingRequests())
-            let namespacePending = pending.filter { $0.hasPrefix(ReminderNotificationConstants.namespacePrefix) }
+            guard pass == generation else { return }
+            let ownedPending = pending.filter { $0.hasPrefix(ReminderNotificationConstants.namespacePrefix) }
             let plannedIDs = Set(planned.map(\.requestIdentifier))
-            let removeIDs = Array(namespacePending.subtracting(plannedIDs))
-            if !removeIDs.isEmpty {
-                await notificationClient.remove(requestIdentifiers: removeIDs)
-            }
+            let retainedIDs = deliverySettings.permissionState.allowsScheduling ? plannedIDs.union(failed) : []
+            await notificationClient.removePending(requestIdentifiers: Array(ownedPending.subtracting(retainedIDs)))
 
-            guard deliverySettings.permissionState.allowsScheduling else {
-                scheduledRequestIDs = []
-                schedulingError = deliverySettings.permissionState == .denied ? "Notification permission is denied. Your reminder settings are saved." : nil
-                return
-            }
+            let delivered = Set(await notificationClient.deliveredRequests())
+            guard pass == generation else { return }
+            // A delivered purchase stays visible until reviewed, disabled or its source disappears.
+            let validDelivered = Set(records.filter {
+                $0.isEnabled && !$0.isReviewed &&
+                ($0.kind == .purchaseReview ? decisionIDs.contains($0.sourceID) : goalIDs.contains($0.sourceID))
+            }.map(\.requestIdentifier))
+            await notificationClient.removeDelivered(requestIdentifiers: Array(delivered.filter {
+                $0.hasPrefix(ReminderNotificationConstants.namespacePrefix) && !validDelivered.contains($0)
+            }))
 
-            for reminder in planned {
-                await notificationClient.remove(requestIdentifiers: [reminder.requestIdentifier])
-                try await notificationClient.schedule(reminder)
+            if deliverySettings.permissionState.allowsScheduling {
+                for reminder in planned {
+                    guard pass == generation else { return }
+                    do {
+                        // Adding the same identifier replaces atomically; preserve the old request on failure.
+                        try await notificationClient.schedule(reminder)
+                    } catch {
+                        failed.insert(reminder.requestIdentifier)
+                        errors.append("Could not schedule \(reminder.title). \(error.localizedDescription)")
+                    }
+                }
+            } else if deliverySettings.permissionState == .denied {
+                errors.append("Notification permission is denied. Your reminder settings are saved.")
             }
-            scheduledRequestIDs = plannedIDs
-            schedulingError = nil
+            let actualPending = Set(await notificationClient.pendingRequests())
+            guard pass == generation else { return }
+            failedRequestIDs = failed
+            scheduledRequestIDs = deliverySettings.permissionState.allowsScheduling
+                ? actualPending.intersection(plannedIDs).subtracting(failed) : []
+            schedulingError = errors.isEmpty ? nil : errors.joined(separator: "\n")
         } catch {
+            scheduledRequestIDs = []
             schedulingError = error.localizedDescription
         }
     }

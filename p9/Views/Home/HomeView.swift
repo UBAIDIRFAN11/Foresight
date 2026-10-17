@@ -4,15 +4,16 @@ import SwiftData
 struct HomeView: View {
     @Bindable var profile: FinancialProfile
     let duplicateProfileCount: Int
+    let evaluationDay: Date
     // Home does not own Simulator navigation; it asks MainTabView to switch tabs.
     let onEvaluatePurchase: (UUID?) -> Void
     @Query(sort: [SortDescriptor(\FinancialGoal.targetDate), SortDescriptor(\FinancialGoal.createdAt)]) private var goals: [FinancialGoal]
     @Query(sort: [SortDescriptor(\SavedDecision.savedAt, order: .reverse)]) private var savedDecisions: [SavedDecision]
     @EnvironmentObject private var router: AppRouter
-    @State private var focusedGoalID: UUID?
+    @State private var focus = HomeFocusSelection()
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    private let today = Date()
+    private var today: Date { evaluationDay }
 
     var body: some View {
         ScrollView {
@@ -31,7 +32,7 @@ struct HomeView: View {
                     Text("Your Current Focus")
                         .font(.headline)
                     if sortedGoals.count > 1 {
-                        Picker("Focus Goal", selection: $focusedGoalID) {
+                        Picker("Focus Goal", selection: $focus.selectedID) {
                             ForEach(sortedGoals) { goal in
                                 Text(goal.name).tag(Optional(goal.id))
                             }
@@ -65,16 +66,24 @@ struct HomeView: View {
                     if let latestDecision = savedDecisions.first {
                         // Recent Decisions reuses the same read-only result view as History.
                         NavigationLink {
-                            PurchaseImpactView(
-                                evaluation: latestDecision.evaluationSnapshot,
-                                mode: .saved(savedAt: latestDecision.savedAt),
-                                onSaved: nil,
-                                onAmountChange: nil,
-                                onAdjust: nil,
-                                onReevaluate: { prefill in
-                                    router.prefillSimulator(prefill)
-                                }
-                            )
+                            if let snapshot = latestDecision.evaluationSnapshot {
+                                PurchaseImpactView(
+                                    evaluation: snapshot,
+                                    mode: .saved(savedAt: latestDecision.savedAt),
+                                    onSaved: nil,
+                                    onAmountChange: nil,
+                                    onAdjust: nil,
+                                    onReevaluate: { prefill in
+                                        router.prefillSimulator(prefill)
+                                    }
+                                )
+                            } else {
+                                ContentUnavailableView(
+                                    "Decision Unavailable",
+                                    systemImage: "questionmark.folder",
+                                    description: Text("The original result could not be restored.")
+                                )
+                            }
                         } label: {
                             recentDecisionRow(latestDecision)
                         }
@@ -91,12 +100,13 @@ struct HomeView: View {
         }
         .background(ForesightTheme.background)
         .navigationDestination(for: UUID.self) { id in
-            GoalDetailView(goalID: id, profile: profile)
+            GoalDetailView(goalID: id, profile: profile, evaluationDay: evaluationDay)
         }
-        .onAppear {
-            if focusedGoalID == nil {
-                focusedGoalID = sortedGoals.first?.id
-            }
+        .onChange(of: sortedGoals.map(\.id), initial: true) { _, ids in
+            focus.reconcile(sortedIDs: ids, preferredID: profile.preferredFocusGoalID)
+        }
+        .onChange(of: profile.preferredFocusGoalID) { _, preferredID in
+            focus.applyDefault(sortedIDs: sortedGoals.map(\.id), preferredID: preferredID)
         }
     }
 
@@ -156,11 +166,7 @@ struct HomeView: View {
     }
 
     private var focusedGoal: FinancialGoal? {
-        // If the stored focus was deleted, fall back to the first sorted goal.
-        if let focusedGoalID, let goal = sortedGoals.first(where: { $0.id == focusedGoalID }) {
-            return goal
-        }
-        return sortedGoals.first
+        sortedGoals.first { $0.id == focus.selectedID }
     }
 
     private var emptyFocus: some View {
@@ -199,7 +205,7 @@ struct HomeView: View {
     }
 
     private func decisionImpactText(_ decision: SavedDecision) -> String {
-        let snapshot = decision.evaluationSnapshot
+        guard let snapshot = decision.evaluationSnapshot else { return "Original result unavailable." }
         if let months = snapshot.result.purchaseDelay.monthCount {
             return months == 0 ? "No completion delay." : "Completion delayed by \(months) \(months == 1 ? "month" : "months")."
         }
@@ -208,7 +214,10 @@ struct HomeView: View {
 }
 
 func goalSort(_ lhs: FinancialGoal, _ rhs: FinancialGoal) -> Bool {
-    // Shared goal ordering: nearest deadline first, then creation date.
+    // Priority only organises goals; calculations remain independent.
+    if lhs.priority != rhs.priority {
+        return lhs.priority.rawValue > rhs.priority.rawValue
+    }
     if lhs.targetDate != rhs.targetDate {
         return lhs.targetDate < rhs.targetDate
     }

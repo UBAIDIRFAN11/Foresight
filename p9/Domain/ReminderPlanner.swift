@@ -74,7 +74,7 @@ struct ReminderPlanner {
             var utcCalendar = Calendar(identifier: .gregorian)
             utcCalendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
             let components = utcCalendar.dateComponents(
-                [.calendar, .timeZone, .year, .month, .day, .hour, .minute],
+                [.calendar, .timeZone, .year, .month, .day, .hour, .minute, .second],
                 from: deliveryDate
             )
             return PlannedReminder(

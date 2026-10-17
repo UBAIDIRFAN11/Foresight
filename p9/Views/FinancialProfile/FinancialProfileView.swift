@@ -46,7 +46,17 @@ struct FinancialProfileView: View {
                 }
 
                 Menu {
-                    Picker("Preferred Currency", selection: $currencyCode) {
+                    Picker("Preferred Currency", selection: Binding(
+                        get: { currencyCode },
+                        set: { newValue in
+                            guard currencyCode != newValue else { return }
+                            currencyCode = newValue
+                            // Clear only an explicit currency change, never a loaded profile.
+                            currentSavings = ""
+                            monthlyIncome = ""
+                            recurringExpenses = ""
+                        }
+                    )) {
                         ForEach(CurrencyDefinition.supported) { currency in
                             Text("\(currency.name) (\(currency.code))").tag(currency.code)
                         }
@@ -78,12 +88,12 @@ struct FinancialProfileView: View {
 
                 moneyField(title: "Current Savings", icon: "banknote", text: $currentSavings)
                 moneyField(title: "Monthly Income", icon: "dollarsign.circle", text: $monthlyIncome)
-                moneyField(title: "Recurring Expenses", icon: "percent", text: $recurringExpenses)
+                moneyField(title: "Recurring Expenses", icon: "creditcard", text: $recurringExpenses)
 
                 savingsSummary
 
                 if isCurrencyLocked {
-                    Label("Currency can be changed once all goals are removed.", systemImage: "lock")
+                    Label("Your goals use your profile currency. To prevent existing goal amounts from changing meaning, currency changes are disabled while you have active goals.", systemImage: "lock")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -117,12 +127,6 @@ struct FinancialProfileView: View {
             }
         }
         .onAppear(perform: loadDraftIfNeeded)
-        .onChange(of: currencyCode) { oldValue, newValue in
-            guard hasLoadedDraft, oldValue != newValue else { return }
-            currentSavings = ""
-            monthlyIncome = ""
-            recurringExpenses = ""
-        }
     }
 
     private var navigationTitle: String {

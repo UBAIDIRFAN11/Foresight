@@ -16,11 +16,32 @@ struct AboutView: View {
                         .font(.largeTitle.weight(.bold))
                     Text("Version \(versionText)")
                         .foregroundStyle(.secondary)
+
+                    Text("Plan Today. A brighter tomorrow")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(ForesightTheme.accent)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 aboutSection("Author", "Ubaid Irfan\n33886466")
-                aboutSection("Purpose", "Foresight helps people estimate whether their savings capacity can meet personal financial goals by a target date using information stored locally on this device.")
-                aboutSection("Disclaimer", "Foresight provides planning estimates based on the information you enter. It does not provide financial advice.")
+                aboutSection("Purpose", "Foresight is a personal financial planning app to help you set goals, make well-informed decisions, and bring your dreams closer.")
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Technologies & Acknowledgements")
+                        .font(.headline)
+
+                    Text("Foresight was developed using Apple's SwiftUI for the user interface, SwiftData for local data persistence, Swift Charts for financial visualisations, and UserNotifications for reminders.")
+                        .foregroundStyle(.secondary)
+
+                    Text("Foreign-currency evaluations use dated exchange-rate information provided by [Frankfurter](https://frankfurter.dev/).")
+                        .foregroundStyle(.secondary)
+                        .tint(ForesightTheme.accent)
+
+                    Text("The application icon was created with assistance from OpenAI's image generation tools.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .foresightCard()
+                aboutSection("Disclaimer", "Foresight provides planning estimates and visualisations for educational purposes only. It is not a substitute for professional financial advice.")
             }
             .foresightReadableContent()
         }

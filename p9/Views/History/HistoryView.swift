@@ -44,10 +44,11 @@ struct HistoryView: View {
         }
         .background(ForesightTheme.background)
         .navigationDestination(for: UUID.self) { id in
-            if let decision = decisions.first(where: { $0.evaluationID == id }) {
+            if let decision = decisions.first(where: { $0.evaluationID == id }),
+               let snapshot = decision.evaluationSnapshot {
                 // Open the saved snapshot, not a recalculation.
                 PurchaseImpactView(
-                    evaluation: decision.evaluationSnapshot,
+                    evaluation: snapshot,
                     mode: .saved(savedAt: decision.savedAt),
                     onSaved: nil,
                     onAmountChange: nil,
@@ -58,9 +59,9 @@ struct HistoryView: View {
                 )
             } else {
                 ContentUnavailableView(
-                    "Decision Missing",
+                    "Decision Unavailable",
                     systemImage: "questionmark.folder",
-                    description: Text("This saved decision is no longer available.")
+                    description: Text("This decision is missing or its original result could not be restored.")
                 )
                 .foresightReadableContent()
                 .background(ForesightTheme.background)
@@ -94,6 +95,11 @@ struct HistoryView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
             }
+            if let conversion = decision.conversion {
+                Text("Original price: \(MoneyFormatting.display(conversion.originalAmountMinor, currencyCode: conversion.exchangeRate.base, includeCode: true))")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             Text(decision.goalName)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -108,7 +114,7 @@ struct HistoryView: View {
 
     private func impactText(_ decision: SavedDecision) -> String {
         // Compact row summary; the detail screen shows the full calculation.
-        let snapshot = decision.evaluationSnapshot
+        guard let snapshot = decision.evaluationSnapshot else { return "Original result unavailable." }
         if snapshot.result.afterPurchase.deadlineBalanceMinor < snapshot.goalTargetMinor {
             return "Deadline missed after purchase."
         }

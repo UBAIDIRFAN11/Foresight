@@ -3,7 +3,9 @@ import SwiftData
 
 struct SimulatorView: View {
     @Bindable var profile: FinancialProfile
+    let evaluationDay: Date
     let initialGoalID: UUID?
+    let goalSelectionRequestID: UUID?
     let prefill: SimulatorPrefill?
     let onPrefillConsumed: (UUID) -> Void
     // MainTabView uses this callback to switch to History after a successful save.
@@ -11,8 +13,13 @@ struct SimulatorView: View {
 
     @Query private var goals: [FinancialGoal]
     @State private var selectedGoalID: UUID?
+    @State private var hasInitializedSelection = false
     @State private var purchaseName = ""
     @State private var amount = ""
+    @State private var purchaseCurrencyCode: String
+    @State private var lookupTask: Task<Void, Never>?
+    @State private var requestID: UUID?
+    @State private var isLoadingRate = false
     @State private var errorMessage: String?
     // The current unsaved calculation result, if the user has calculated one.
     @State private var evaluation: PurchaseImpactEvaluation?
@@ -25,13 +32,18 @@ struct SimulatorView: View {
 
     init(
         profile: FinancialProfile,
+        evaluationDay: Date,
         initialGoalID: UUID? = nil,
+        goalSelectionRequestID: UUID? = nil,
         prefill: SimulatorPrefill? = nil,
         onPrefillConsumed: @escaping (UUID) -> Void = { _ in },
         onSaved: @escaping (SavedDecision) -> Void = { _ in }
     ) {
+        self.evaluationDay = evaluationDay
         self.profile = profile
+        _purchaseCurrencyCode = State(initialValue: profile.preferredCurrencyCode)
         self.initialGoalID = initialGoalID
+        self.goalSelectionRequestID = goalSelectionRequestID
         self.prefill = prefill
         self.onPrefillConsumed = onPrefillConsumed
         self.onSaved = onSaved
@@ -61,6 +73,7 @@ struct SimulatorView: View {
                 } else {
                     // Goal selection is kept stable even if goals are added or deleted.
                     Picker("Goal", selection: $selectedGoalID) {
+                        Text("Choose a goal").tag(nil as UUID?)
                         ForEach(sortedGoals) { goal in
                             Text(goal.name).tag(Optional(goal.id))
                         }
@@ -88,10 +101,20 @@ struct SimulatorView: View {
                             .textFieldStyle(.roundedBorder)
                             .focused($focusedField, equals: .amount)
                     }
-                    Text("Currency: \(profile.preferredCurrencyCode)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Picker("Purchase currency", selection: Binding(
+                        get: { purchaseCurrencyCode },
+                        set: { currency in
+                            cancelLookup()
+                            purchaseCurrencyCode = currency
+                            amount = ""
+                            evaluation = nil
+                            errorMessage = nil
+                        }
+                    )) {
+                        ForEach(CurrencyDefinition.supported) { currency in
+                            Text("\(currency.code) – \(currency.name)").tag(currency.code)
+                        }
+                    }
                 }
                 .foresightCard()
 
@@ -105,10 +128,10 @@ struct SimulatorView: View {
                             .font(.largeTitle)
                             .foregroundStyle(ForesightTheme.accent)
                         VStack(alignment: .leading) {
-                            Text(MoneyFormatting.display(previewAmount, currencyCode: profile.preferredCurrencyCode))
+                            Text(MoneyFormatting.display(previewAmount, currencyCode: purchaseCurrencyCode))
                                 .font(.title.weight(.bold))
                                 .fixedSize(horizontal: false, vertical: true)
-                            Text(profile.preferredCurrencyCode)
+                            Text(purchaseCurrencyCode)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -129,11 +152,16 @@ struct SimulatorView: View {
                 .foresightPrimaryAction()
                 .disabled(sortedGoals.isEmpty)
 
+                if isLoadingRate {
+                    ProgressView("Looking up dated exchange-rate information…")
+                    Button("Cancel Lookup", action: cancelLookup)
+                }
                 if let errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    Button("Retry", action: calculateImpact)
                 }
             }
             .foresightReadableContent()
@@ -169,9 +197,22 @@ struct SimulatorView: View {
             }
         }
         .onAppear {
-            reconcileSelection(preferredID: initialGoalID)
+            if !hasInitializedSelection {
+                hasInitializedSelection = true
+                reconcileSelection(preferredID: initialGoalID)
+            }
             receivePrefillIfNeeded(prefill)
         }
+        .onChange(of: goalSelectionRequestID) { _, _ in
+            reconcileSelection(preferredID: initialGoalID)
+        }
+        .onChange(of: evaluationDay) { _, _ in cancelLookup() }
+        .onChange(of: profile.preferredCurrencyCode) { _, _ in cancelLookup() }
+        .onChange(of: financialDraftInputs) { _, _ in cancelLookup() }
+        .onChange(of: selectedGoal?.name) { _, _ in cancelLookup() }
+        .onChange(of: amount) { _, _ in cancelLookup() }
+        .onChange(of: purchaseName) { _, _ in cancelLookup() }
+        .onChange(of: selectedGoalID) { _, _ in cancelLookup() }
         .onChange(of: goals.map(\.id)) { _, _ in
             reconcileSelection(preferredID: selectedGoalID)
         }
@@ -202,7 +243,14 @@ struct SimulatorView: View {
     private var previewAmount: Int64? {
         // A valid amount gets previewed before calculation; invalid text simply
         // waits for the Calculate button to show a validation message.
-        try? MoneyFormatting.parseMinorUnits(amount, currency: CurrencyDefinition.definition(for: profile.preferredCurrencyCode))
+        try? MoneyFormatting.parseMinorUnits(amount, currency: CurrencyDefinition.definition(for: purchaseCurrencyCode))
+    }
+
+    private var financialDraftInputs: FinancialInputs? {
+        guard let goal = selectedGoal else { return nil }
+        return FinancialInputs(savingsMinor: profile.currentSavingsMinor, incomeMinor: profile.monthlyIncomeMinor,
+                               expensesMinor: profile.recurringExpensesMinor, targetMinor: goal.targetAmountMinor,
+                               evaluationDate: evaluationDay, targetDate: goal.targetDate)
     }
 
     private var selectedGoal: FinancialGoal? {
@@ -225,6 +273,12 @@ struct SimulatorView: View {
         guard let prefill else { return }
         if hasUnsavedDraft {
             pendingPrefill = prefill
+            if isShowingResult {
+                // The confirmation belongs to the draft screen. Its onAppear
+                // presents it after returning from the existing result.
+                isShowingResult = false
+                return
+            }
             isConfirmingDraftReplacement = true
         } else {
             applyPrefill(prefill)
@@ -239,14 +293,13 @@ struct SimulatorView: View {
 
     private func applyPrefill(_ prefill: SimulatorPrefill) {
         purchaseName = prefill.purchaseName
-        if prefill.currencyCode == profile.preferredCurrencyCode {
-            amount = MoneyFormatting.editableText(prefill.amountMinor, currencyCode: prefill.currencyCode)
-        } else {
-            amount = ""
-            errorMessage = "The original decision used \(prefill.currencyCode). Enter an amount in \(profile.preferredCurrencyCode) to re-evaluate with your current profile."
-        }
+        cancelLookup()
+        purchaseCurrencyCode = prefill.currencyCode
+        amount = MoneyFormatting.editableText(prefill.amountMinor, currencyCode: prefill.currencyCode)
+        errorMessage = nil
         reconcileSelection(preferredID: prefill.preferredGoalID)
         if selectedGoalID != prefill.preferredGoalID {
+            selectedGoalID = nil
             errorMessage = "The original goal is no longer available. Choose a current goal before calculating."
         }
         evaluation = nil
@@ -256,8 +309,16 @@ struct SimulatorView: View {
     }
 
 
+    private func cancelLookup() {
+        lookupTask?.cancel()
+        lookupTask = nil
+        requestID = nil
+        isLoadingRate = false
+    }
+
     private func calculateImpact() {
         focusedField = nil
+        cancelLookup()
         // Simulator validates UI input first, then hands clean values to the
         // domain calculator.
         let cleanedName = FinancialFormValidation.cleanName(purchaseName)
@@ -270,10 +331,11 @@ struct SimulatorView: View {
             return
         }
 
-        let currency = CurrencyDefinition.definition(for: profile.preferredCurrencyCode)
-        let purchaseMinor: Int64
+        let currency = CurrencyDefinition.definition(for: purchaseCurrencyCode)
+        let originalMinor: Int64
         do {
-            purchaseMinor = try MoneyFormatting.parseMinorUnits(amount, currency: currency)
+            originalMinor = try MoneyFormatting.parseMinorUnits(amount, currency: currency)
+            guard originalMinor > 0 else { throw PurchaseImpactError.invalidPurchaseAmount }
         } catch {
             errorMessage = error.localizedDescription
             return
@@ -289,36 +351,66 @@ struct SimulatorView: View {
             evaluationDate: evaluationDate,
             targetDate: goal.targetDate
         )
-
-        switch PurchaseImpactCalculator.evaluate(PurchaseImpactInputs(financialInputs: inputs, purchaseAmountMinor: purchaseMinor)) {
-        case .success(let result):
-            // A new calculation gets a new ID so saving it creates a distinct decision.
-            evaluation = PurchaseImpactEvaluation(
-                id: UUID(),
-                purchaseName: cleanedName,
-                purchaseAmountMinor: purchaseMinor,
-                currencyCode: profile.preferredCurrencyCode,
-                goalID: goal.id,
-                goalName: goal.name,
-                goalTargetMinor: goal.targetAmountMinor,
-                goalTargetDate: goal.targetDate,
-                originalSavingsMinor: profile.currentSavingsMinor,
-                originalIncomeMinor: profile.monthlyIncomeMinor,
-                originalExpensesMinor: profile.recurringExpensesMinor,
-                evaluationDate: evaluationDate,
-                result: result
-            )
-            errorMessage = nil
-            isShowingResult = true
-        case .failure(let error):
-            errorMessage = error.localizedDescription
+        let goalID = goal.id, goalName = goal.name
+        let sourceCurrency = purchaseCurrencyCode, destinationCurrency = profile.preferredCurrencyCode
+        let draftAmount = amount, draftName = purchaseName
+        let token = UUID()
+        requestID = token
+        isLoadingRate = sourceCurrency != destinationCurrency
+        errorMessage = nil
+        lookupTask = Task { @MainActor in
+            do {
+                let quote = try await FrankfurterClient().fetchRate(from: sourceCurrency, to: destinationCurrency)
+                try Task.checkCancellation()
+                guard requestID == token else { return }
+                guard amount == draftAmount, purchaseName == draftName, purchaseCurrencyCode == sourceCurrency,
+                      selectedGoalID == goalID, let currentGoal = selectedGoal,
+                      currentGoal.name == goalName, currentGoal.targetAmountMinor == inputs.targetMinor,
+                      currentGoal.targetDate == inputs.targetDate,
+                      profile.currentSavingsMinor == inputs.savingsMinor, profile.monthlyIncomeMinor == inputs.incomeMinor,
+                      profile.recurringExpensesMinor == inputs.expensesMinor, profile.preferredCurrencyCode == destinationCurrency,
+                      FinancialCalendar.localEvaluationDay() == evaluationDate else {
+                    throw EvaluationChangedError()
+                }
+                let converted = try CurrencyConversion.convert(originalMinor,
+                    from: CurrencyDefinition.definition(for: sourceCurrency), to: CurrencyDefinition.definition(for: destinationCurrency),
+                    rate: quote?.rate ?? 1, availableSavings: inputs.savingsMinor)
+                let result = try PurchaseImpactCalculator.evaluate(PurchaseImpactInputs(financialInputs: inputs, purchaseAmountMinor: converted)).get()
+                // A new calculation gets a new ID so saving it creates a distinct decision.
+                evaluation = PurchaseImpactEvaluation(
+                    id: UUID(),
+                    purchaseName: cleanedName,
+                    purchaseAmountMinor: converted,
+                    currencyCode: destinationCurrency,
+                    goalID: goalID,
+                    goalName: goalName,
+                    goalTargetMinor: inputs.targetMinor,
+                    goalTargetDate: inputs.targetDate,
+                    originalSavingsMinor: inputs.savingsMinor,
+                    originalIncomeMinor: inputs.incomeMinor,
+                    originalExpensesMinor: inputs.expensesMinor,
+                    evaluationDate: evaluationDate,
+                    result: result,
+                    conversion: quote.map { PurchaseConversion(originalAmountMinor: originalMinor, exchangeRate: $0) }
+                )
+                isShowingResult = true
+            } catch is CancellationError {
+                // Superseded requests never replace the current draft or result.
+            } catch {
+                if requestID == token { errorMessage = error.localizedDescription }
+            }
+            if requestID == token {
+                isLoadingRate = false
+                requestID = nil
+                lookupTask = nil
+            }
         }
     }
 
     private func staleState(for evaluation: PurchaseImpactEvaluation) -> (isStale: Bool, message: String?) {
         // The user must recalculate if anything that affected the result changed
         // before the result was saved.
-        guard FinancialCalendar.localEvaluationDay() == evaluation.evaluationDate else {
+        guard evaluationDay == evaluation.evaluationDate else {
             return (true, "The calendar day has changed since this calculation. Recalculate before saving.")
         }
         guard let goal = sortedGoals.first(where: { $0.id == evaluation.goalID }) else {
@@ -337,38 +429,17 @@ struct SimulatorView: View {
     }
 
     private func updateLiveEvaluationAmount(_ newAmountMinor: Int64) {
-        guard let current = evaluation, newAmountMinor != current.purchaseAmountMinor else { return }
-
-        let inputs = FinancialInputs(
-            savingsMinor: current.originalSavingsMinor,
-            incomeMinor: current.originalIncomeMinor,
-            expensesMinor: current.originalExpensesMinor,
-            targetMinor: current.goalTargetMinor,
-            evaluationDate: current.evaluationDate,
-            targetDate: current.goalTargetDate
-        )
-
-        switch PurchaseImpactCalculator.evaluate(PurchaseImpactInputs(financialInputs: inputs, purchaseAmountMinor: newAmountMinor)) {
-        case .success(let result):
-            evaluation = PurchaseImpactEvaluation(
-                id: UUID(),
-                purchaseName: current.purchaseName,
-                purchaseAmountMinor: newAmountMinor,
-                currencyCode: current.currencyCode,
-                goalID: current.goalID,
-                goalName: current.goalName,
-                goalTargetMinor: current.goalTargetMinor,
-                goalTargetDate: current.goalTargetDate,
-                originalSavingsMinor: current.originalSavingsMinor,
-                originalIncomeMinor: current.originalIncomeMinor,
-                originalExpensesMinor: current.originalExpensesMinor,
-                evaluationDate: current.evaluationDate,
-                result: result
-            )
-            amount = MoneyFormatting.editableText(newAmountMinor, currencyCode: current.currencyCode)
+        guard let current = evaluation else { return }
+        do {
+            evaluation = try current.adjustingOriginalAmount(newAmountMinor)
+            amount = MoneyFormatting.editableText(newAmountMinor, currencyCode: current.originalCurrencyCode)
             errorMessage = nil
-        case .failure(let error):
+        } catch {
             errorMessage = error.localizedDescription
         }
     }
+}
+
+private struct EvaluationChangedError: LocalizedError {
+    var errorDescription: String? { "The draft, profile, goal or calendar day changed during lookup. Calculate again." }
 }

@@ -9,6 +9,11 @@ final class SavedDecision {
     var savedAt: Date
     var purchaseName: String
     var purchaseAmountMinor: Int64
+    var originalPurchaseAmountMinor: Int64? = nil
+    var originalPurchaseCurrencyCode: String? = nil
+    var exchangeRateString: String? = nil
+    var exchangeRateObservationDate: Date? = nil
+    var exchangeRateFetchedAt: Date? = nil
     var currencyCode: String
     var goalID: UUID
     var goalName: String
@@ -43,6 +48,11 @@ final class SavedDecision {
         self.purchaseName = evaluation.purchaseName
         self.purchaseAmountMinor = evaluation.purchaseAmountMinor
         self.currencyCode = evaluation.currencyCode
+        self.originalPurchaseAmountMinor = evaluation.conversion?.originalAmountMinor
+        self.originalPurchaseCurrencyCode = evaluation.conversion?.exchangeRate.base
+        self.exchangeRateString = evaluation.conversion?.exchangeRate.rateString
+        self.exchangeRateObservationDate = evaluation.conversion?.exchangeRate.observationDate
+        self.exchangeRateFetchedAt = evaluation.conversion?.exchangeRate.fetchedAt
         self.goalID = evaluation.goalID
         self.goalName = evaluation.goalName
         self.goalTargetMinor = evaluation.goalTargetMinor
@@ -87,41 +97,78 @@ struct PurchaseImpactEvaluation: Identifiable, Equatable {
     let originalExpensesMinor: Int64
     let evaluationDate: Date
     let result: PurchaseImpactResult
+    var conversion: PurchaseConversion? = nil
+
+    var originalAmountMinor: Int64 { conversion?.originalAmountMinor ?? purchaseAmountMinor }
+    var originalCurrencyCode: String { conversion?.exchangeRate.base ?? currencyCode }
+
+    func convertedCost(for originalMinor: Int64) throws -> Int64 {
+        try CurrencyConversion.convert(
+            originalMinor,
+            from: CurrencyDefinition.definition(for: originalCurrencyCode),
+            to: CurrencyDefinition.definition(for: currencyCode),
+            rate: conversion?.exchangeRate.rate ?? 1,
+            availableSavings: originalSavingsMinor
+        )
+    }
+
+    func adjustingOriginalAmount(_ originalMinor: Int64) throws -> PurchaseImpactEvaluation {
+        guard originalMinor != originalAmountMinor else { return self }
+        let converted = try convertedCost(for: originalMinor)
+        let inputs = FinancialInputs(savingsMinor: originalSavingsMinor, incomeMinor: originalIncomeMinor,
+                                     expensesMinor: originalExpensesMinor, targetMinor: goalTargetMinor,
+                                     evaluationDate: evaluationDate, targetDate: goalTargetDate)
+        let result = try PurchaseImpactCalculator.evaluate(PurchaseImpactInputs(financialInputs: inputs, purchaseAmountMinor: converted)).get()
+        return PurchaseImpactEvaluation(
+            id: UUID(), purchaseName: purchaseName, purchaseAmountMinor: converted, currencyCode: currencyCode,
+            goalID: goalID, goalName: goalName, goalTargetMinor: goalTargetMinor, goalTargetDate: goalTargetDate,
+            originalSavingsMinor: originalSavingsMinor, originalIncomeMinor: originalIncomeMinor,
+            originalExpensesMinor: originalExpensesMinor, evaluationDate: evaluationDate, result: result,
+            conversion: conversion.map { PurchaseConversion(originalAmountMinor: originalMinor, exchangeRate: $0.exchangeRate) }
+        )
+    }
 }
 
 extension SavedDecision {
-    var evaluationSnapshot: PurchaseImpactEvaluation {
-        // Rebuild a display-ready result from stored snapshot fields.
-        // This does not recalculate using the current profile or current goal.
-        let baseline = FinancialCalculationResult(
-            monthlyCapacityMinor: originalIncomeMinor - originalExpensesMinor,
-            remainingMinor: max(goalTargetMinor - originalSavingsMinor, 0),
-            progress: min(Double(originalSavingsMinor) / Double(goalTargetMinor), 1),
-            monthlyRequiredMinor: 0,
-            deadlineBalanceMinor: baselineDeadlineBalanceMinor,
-            monthsToDeadline: FinancialCalendar.monthsWithDeposits(from: evaluationDate, through: goalTargetDate),
-            status: .fundedNow,
-            completionProjection: GoalCompletionProjection(kind: baselineCompletionKind, months: baselineCompletionMonths, date: baselineCompletionDate)
-        )
-        let after = FinancialCalculationResult(
-            monthlyCapacityMinor: originalIncomeMinor - originalExpensesMinor,
-            remainingMinor: max(goalTargetMinor - remainingSavingsMinor, 0),
-            progress: min(Double(remainingSavingsMinor) / Double(goalTargetMinor), 1),
-            monthlyRequiredMinor: 0,
-            deadlineBalanceMinor: afterDeadlineBalanceMinor,
-            monthsToDeadline: FinancialCalendar.monthsWithDeposits(from: evaluationDate, through: goalTargetDate),
-            status: .fundedNow,
-            completionProjection: GoalCompletionProjection(kind: afterCompletionKind, months: afterCompletionMonths, date: afterCompletionDate)
-        )
+    var conversion: PurchaseConversion? {
+        guard let originalPurchaseAmountMinor, originalPurchaseAmountMinor > 0,
+              let originalPurchaseCurrencyCode, !originalPurchaseCurrencyCode.isEmpty,
+              let exchangeRateString,
+              exchangeRateString.range(of: #"\A[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\z"#, options: .regularExpression) != nil,
+              let rate = Decimal(string: exchangeRateString, locale: Locale(identifier: "en_US_POSIX")),
+              !rate.isNaN, rate > 0,
+              let exchangeRateObservationDate, let exchangeRateFetchedAt else { return nil }
+        return PurchaseConversion(originalAmountMinor: originalPurchaseAmountMinor,
+                                  exchangeRate: ExchangeRate(base: originalPurchaseCurrencyCode, quote: currencyCode, rate: rate,
+                                                             observationDate: exchangeRateObservationDate, fetchedAt: exchangeRateFetchedAt))
+    }
+
+    var evaluationSnapshot: PurchaseImpactEvaluation? {
+        // Unknown or incomplete stored values must not become plausible-looking results.
+        let savedConversion = conversion
+        guard !hasConversionMetadata || savedConversion != nil,
+              goalTargetMinor > 0, originalSavingsMinor >= 0, remainingSavingsMinor >= 0,
+              originalIncomeMinor >= 0, originalExpensesMinor >= 0,
+              let baselineProjection = GoalCompletionProjection(kind: baselineCompletionKind, months: baselineCompletionMonths, date: baselineCompletionDate),
+              let afterProjection = GoalCompletionProjection(kind: afterCompletionKind, months: afterCompletionMonths, date: afterCompletionDate),
+              let baseline = snapshotCalculation(savingsMinor: originalSavingsMinor, deadlineBalanceMinor: baselineDeadlineBalanceMinor,
+                                                 statusTitle: baselineStatus, projection: baselineProjection),
+              let after = snapshotCalculation(savingsMinor: remainingSavingsMinor, deadlineBalanceMinor: afterDeadlineBalanceMinor,
+                                              statusTitle: afterStatus, projection: afterProjection),
+              let delay = PurchaseImpactMetric(kind: delayKind, months: delayMonths, amount: 0),
+              let extraMonthly = PurchaseImpactMetric(kind: extraMonthlyKind, months: 0, amount: extraMonthlyMinor),
+              let maximumPurchase = PurchaseImpactMetric(kind: maximumPurchaseKind, months: 0, amount: maximumPurchaseMinor) else {
+            return nil
+        }
         let result = PurchaseImpactResult(
             baseline: baseline,
             afterPurchase: after,
             remainingSavingsMinor: remainingSavingsMinor,
             deadlineBalanceBeforeMinor: baselineDeadlineBalanceMinor,
             deadlineBalanceAfterMinor: afterDeadlineBalanceMinor,
-            purchaseDelay: PurchaseImpactMetric(kind: delayKind, months: delayMonths, amount: 0),
-            extraMonthlySavings: PurchaseImpactMetric(kind: extraMonthlyKind, months: 0, amount: extraMonthlyMinor),
-            maximumPurchasePreservingDeadline: PurchaseImpactMetric(kind: maximumPurchaseKind, months: 0, amount: maximumPurchaseMinor)
+            purchaseDelay: delay,
+            extraMonthlySavings: extraMonthly,
+            maximumPurchasePreservingDeadline: maximumPurchase
         )
         return PurchaseImpactEvaluation(
             id: evaluationID,
@@ -136,7 +183,35 @@ extension SavedDecision {
             originalIncomeMinor: originalIncomeMinor,
             originalExpensesMinor: originalExpensesMinor,
             evaluationDate: evaluationDate,
-            result: result
+            result: result,
+            conversion: savedConversion
+        )
+    }
+
+    private var hasConversionMetadata: Bool {
+        originalPurchaseAmountMinor != nil || originalPurchaseCurrencyCode != nil ||
+            exchangeRateString != nil || exchangeRateObservationDate != nil || exchangeRateFetchedAt != nil
+    }
+
+    private func snapshotCalculation(
+        savingsMinor: Int64, deadlineBalanceMinor: Int64,
+        statusTitle: String, projection: GoalCompletionProjection
+    ) -> FinancialCalculationResult? {
+        // Derive only unstored fields from the original inputs, never the current profile or goal.
+        let months = FinancialCalendar.monthsWithDeposits(from: evaluationDate, through: goalTargetDate)
+        guard let status = GoalFundingStatus(snapshotTitle: statusTitle, projection: projection,
+                                            deadlineBalanceMinor: deadlineBalanceMinor, monthsToDeadline: months,
+                                            targetDate: FinancialCalendar.utcNoon(for: goalTargetDate, in: FinancialCalendar.gregorianUTC)) else { return nil }
+        let remaining = max(goalTargetMinor - savingsMinor, 0)
+        return FinancialCalculationResult(
+            monthlyCapacityMinor: originalIncomeMinor - originalExpensesMinor,
+            remainingMinor: remaining,
+            progress: min(Double(savingsMinor) / Double(goalTargetMinor), 1),
+            monthlyRequiredMinor: status == .pastDeadline || months == 0 ? 0 : FinancialCalculator.ceilDivision(remaining, by: Int64(months)),
+            deadlineBalanceMinor: deadlineBalanceMinor,
+            monthsToDeadline: months,
+            status: status,
+            completionProjection: projection
         )
     }
 }
@@ -161,16 +236,19 @@ extension GoalCompletionProjection {
         if case .projected(_, let date) = self { date } else { nil }
     }
 
-    init(kind: String, months: Int, date: Date?) {
+    init?(kind: String, months: Int, date: Date?) {
         switch kind {
         case "completedNow":
             self = .completedNow
         case "projected":
-            self = .projected(months: months, date: date ?? Date.distantFuture)
+            guard months > 0, let date else { return nil }
+            self = .projected(months: months, date: date)
         case "noPositiveSavingsCapacity":
             self = .noPositiveSavingsCapacity
-        default:
+        case "beyondLimit":
             self = .beyondLimit
+        default:
+            return nil
         }
     }
 }
@@ -193,19 +271,44 @@ extension PurchaseImpactMetric {
         if case .amount(let amount) = self { amount } else { 0 }
     }
 
-    init(kind: String, months: Int, amount: Int64) {
+    init?(kind: String, months: Int, amount: Int64) {
         if kind == "amount" {
+            guard amount >= 0 else { return nil }
             self = .amount(amount)
         } else if kind == "months" {
+            guard months >= 0 else { return nil }
             self = .months(months)
         } else {
-            let raw = kind.replacingOccurrences(of: "unavailable:", with: "")
-            self = .unavailable(PurchaseImpactUnavailableReason(rawValue: raw) ?? .arithmeticOverflow)
+            let prefix = "unavailable:"
+            guard kind.hasPrefix(prefix),
+                  let reason = PurchaseImpactUnavailableReason(rawValue: String(kind.dropFirst(prefix.count))) else { return nil }
+            self = .unavailable(reason)
         }
     }
 }
 
 extension GoalFundingStatus {
+    init?(snapshotTitle: String, projection: GoalCompletionProjection, deadlineBalanceMinor: Int64, monthsToDeadline: Int, targetDate: Date) {
+        switch snapshotTitle {
+        case "Funded now": self = .fundedNow
+        case "On track":
+            let date: Date
+            if case .projected(_, let projectedDate) = projection { date = projectedDate } else { date = targetDate }
+            self = .onTrack(completionDate: date, deadlineBalanceMinor: deadlineBalanceMinor, monthsToDeadline: monthsToDeadline)
+        case "At risk":
+            let date: Date?
+            if case .projected(_, let projectedDate) = projection { date = projectedDate } else { date = nil }
+            self = .atRisk(completionDate: date, deadlineBalanceMinor: deadlineBalanceMinor, monthsToDeadline: monthsToDeadline)
+        case "No deposit before deadline": self = .noContributionBeforeDeadline
+        case "Past deadline": self = .pastDeadline
+        case "No savings capacity": self = .nonpositiveCapacity
+        case "Invalid inputs": self = .invalidInputs
+        case "Calculation overflow": self = .overflow
+        case "Beyond projection limit": self = .completionBeyondLimit
+        default: return nil
+        }
+    }
+
     // Human-readable status labels captured with the saved snapshot.
     var summaryTitle: String {
         switch self {

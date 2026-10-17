@@ -15,6 +15,7 @@ final class FinancialProfile {
     var monthlyIncomeMinor: Int64
     var recurringExpensesMinor: Int64
     var preferredCurrencyCode: String
+    var preferredFocusGoalID: UUID? = nil
 
     init(
         id: UUID = UUID(),
