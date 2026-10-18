@@ -186,6 +186,13 @@ nonisolated enum FinancialInsightAvailability: Equatable, Sendable {
     var canCheckAgain: Bool { self == .modelNotReady || self == .unavailable }
 }
 
+// How an attempt samples. The first attempt is greedy and repeatable; greedy output for the same
+// prompt never changes, so a retry after a rejected response uses modest random sampling instead.
+nonisolated enum FinancialInsightSampling: Equatable, Sendable {
+    case deterministic
+    case varied
+}
+
 nonisolated enum FinancialInsightFailure: Error, Equatable, Sendable {
     case refused
     case guardrailViolation
@@ -193,6 +200,8 @@ nonisolated enum FinancialInsightFailure: Error, Equatable, Sendable {
     case contextTooLarge
     case unsupportedLanguage
     case unusableResponse
+    // Every permitted attempt was rejected by the validator; retrying further is not offered.
+    case noReliableExplanation
     case busy
     case unexpected
 
@@ -210,6 +219,8 @@ nonisolated enum FinancialInsightFailure: Error, Equatable, Sendable {
             "AI explanations currently support English only."
         case .unusableResponse:
             "The generated explanation did not meet Foresight's accuracy rules, so it was not shown."
+        case .noReliableExplanation:
+            "Foresight could not generate an explanation that met its accuracy rules for this result. Your Foresight figures above are unaffected."
         case .busy:
             "The on-device model is busy. Wait a moment and try again."
         case .unexpected:
@@ -220,7 +231,7 @@ nonisolated enum FinancialInsightFailure: Error, Equatable, Sendable {
     // Retry uses the same snapshot with a fresh session.
     var canRetry: Bool {
         switch self {
-        case .contextTooLarge, .unsupportedLanguage: false
+        case .contextTooLarge, .unsupportedLanguage, .noReliableExplanation: false
         default: true
         }
     }

@@ -16,15 +16,21 @@ final class FinancialInsightViewModel {
         case stale
     }
 
+    // Rejected responses allowed per sheet: the deterministic first attempt plus up to two
+    // varied user retries. Every attempt passes the same validator; this only bounds retrying.
+    // Transient failures such as a busy model do not count.
+    static let maximumRejections = 3
+
     private(set) var state: State = .idle
     private(set) var activeAttemptID: UUID?
+    private(set) var rejectedCount = 0
 
     func generate(_ request: FinancialInsightRequest, attemptID: UUID,
                   validateSource: @MainActor () throws -> Void,
                   service: any FinancialInsightGenerating) async {
         // No automatic regeneration, no duplicate work and no recovery from stale.
         switch state {
-        case .stale, .completed, .generating: return
+        case .stale, .completed, .generating, .failed(.noReliableExplanation): return
         case .idle, .unavailable, .failed, .cancelled: break
         }
         activeAttemptID = attemptID
@@ -38,12 +44,25 @@ final class FinancialInsightViewModel {
             }
             try Task.checkCancellation()
             state = .generating
-            let generated = try await service.generate(for: request)
-            // A dismissed, cancelled or replaced attempt must never publish.
-            guard activeAttemptID == attemptID else { return }
-            try Task.checkCancellation()
-            try validateSource()
-            let insight = try FinancialInsightValidator.validate(generated, for: request)
+            // Greedy output never changes for the same prompt, so after a rejected response
+            // the retry samples instead of reproducing the same rejection.
+            let sampling: FinancialInsightSampling = rejectedCount == 0 ? .deterministic : .varied
+            let insight: ValidatedFinancialInsight
+            do {
+                let generated = try await service.generate(for: request, sampling: sampling)
+                // A dismissed, cancelled or replaced attempt must never publish.
+                guard activeAttemptID == attemptID else { return }
+                try Task.checkCancellation()
+                try validateSource()
+                insight = try FinancialInsightValidator.validate(generated, for: request)
+            } catch FinancialInsightFailure.unusableResponse where activeAttemptID == attemptID {
+                // One count per attempt, whether the service could not decode the response or the
+                // validator rejected it. After the last permitted rejection, say so rather than
+                // offer another Retry.
+                rejectedCount += 1
+                throw rejectedCount >= Self.maximumRejections
+                    ? FinancialInsightFailure.noReliableExplanation : FinancialInsightFailure.unusableResponse
+            }
             activeAttemptID = nil
             state = .completed(insight)
         } catch is CancellationError {

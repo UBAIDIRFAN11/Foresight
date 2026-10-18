@@ -111,15 +111,28 @@ enum FinancialInsightContextBuilder {
             FinancialInsightFact(id: "progress", label: "Funded now", value: progressText(result.progress)),
             FinancialInsightFact(id: "capacity", label: "Monthly capacity (income minus expenses)", value: money(result.monthlyCapacityMinor)),
             FinancialInsightFact(id: "required", label: "Required each month to reach the target by the deadline", value: required),
-            FinancialInsightFact(id: "deposits", label: "Monthly deposits before the deadline", value: "\(result.monthsToDeadline)"),
+            FinancialInsightFact(id: "deposits", label: "Number of monthly deposits before the deadline", value: "\(result.monthsToDeadline)"),
             FinancialInsightFact(id: "deadline", label: "Deadline", value: formatted(inputs.targetDate)),
             FinancialInsightFact(id: "deadlineBalance", label: "Projected balance on the deadline", value: money(result.deadlineBalanceMinor)),
             FinancialInsightFact(id: "completion", label: "Projected completion", value: completionText(result.completionProjection))
         ]
 
         var relationships: [String] = []
+        // Savings against the target today, when it is the comparison the explanation turns on:
+        // already funded, or no deposit can count before the deadline. The model otherwise
+        // calculated this difference itself.
+        if result.remainingMinor == 0 || result.status == .pastDeadline || result.status == .noContributionBeforeDeadline,
+           let difference = magnitude(of: inputs.savingsMinor, minus: inputs.targetMinor) {
+            relationships.append(inputs.savingsMinor == inputs.targetMinor
+                ? "Current savings exactly match the target today."
+                : inputs.savingsMinor > inputs.targetMinor
+                    ? "Current savings are \(money(difference)) above the target today."
+                    : "Current savings are \(money(difference)) below the target today.")
+        }
         // Capacity against the required contribution, only when deposits remain and money is still needed.
-        if hasDeposits, result.remainingMinor > 0, result.status != .pastDeadline,
+        // With zero or negative capacity the gap reads as a large "less than required" figure that
+        // the deficit relationship below explains more plainly, so it is only stated for positive capacity.
+        if hasDeposits, result.monthlyCapacityMinor > 0, result.remainingMinor > 0, result.status != .pastDeadline,
            let gap = magnitude(of: result.monthlyCapacityMinor, minus: result.monthlyRequiredMinor) {
             relationships.append(result.monthlyCapacityMinor >= result.monthlyRequiredMinor
                 ? "Monthly capacity is \(money(gap)) more than the amount required each month."
@@ -127,6 +140,9 @@ enum FinancialInsightContextBuilder {
         }
         if result.monthlyCapacityMinor < 0 {
             relationships.append("Expenses exceed income by \(money(-result.monthlyCapacityMinor)) each month, so the balance falls over time.")
+        } else if result.monthlyCapacityMinor == 0 {
+            // Without this the model filled the gap with advice to change income or expenses.
+            relationships.append("Income exactly matches expenses, so the balance stays at current savings and does not grow.")
         }
         if result.status != .pastDeadline,
            let margin = magnitude(of: result.deadlineBalanceMinor, minus: inputs.targetMinor) {
@@ -135,10 +151,18 @@ enum FinancialInsightContextBuilder {
                 : "On the deadline, the projected balance is \(money(margin)) below the target.")
         }
         // Compare by date: a deposit count alone read like "months early" when it was not.
-        if case .projected(let months, let date) = result.completionProjection, hasDeposits {
+        // With no deposit before the deadline, every projected deposit falls after it; stating the
+        // count stops the model working out the gap itself (it produced 2 and 10 for a 4-deposit gap).
+        if case .projected(let months, let date) = result.completionProjection,
+           hasDeposits || result.status == .noContributionBeforeDeadline {
             if months > result.monthsToDeadline {
                 let extra = months - result.monthsToDeadline
-                relationships.append("The target is projected to be reached on \(formatted(date)), after the \(formatted(inputs.targetDate)) deadline, needing \(extra) more monthly \(extra == 1 ? "deposit" : "deposits").")
+                let plural = { (count: Int) in count == 1 ? "deposit" : "deposits" }
+                // Both counts are stated: the model once quoted the completion duration as the
+                // number of deposits "by the deadline".
+                relationships.append(result.monthsToDeadline > 0
+                    ? "The target is projected to be reached on \(formatted(date)), after the \(formatted(inputs.targetDate)) deadline: \(result.monthsToDeadline) monthly \(plural(result.monthsToDeadline)) occur before the deadline, and \(extra) more \(extra == 1 ? "is" : "are") needed after it."
+                    : "The target is projected to be reached on \(formatted(date)), after the \(formatted(inputs.targetDate)) deadline, needing \(extra) more monthly \(plural(extra)).")
             } else if months < result.monthsToDeadline {
                 relationships.append("The target is projected to be reached on \(formatted(date)), before the \(formatted(inputs.targetDate)) deadline.")
             }
@@ -170,11 +194,16 @@ enum FinancialInsightContextBuilder {
         default:
             break
         }
-        if result.monthlyCapacityMinor <= 0 {
+        // An open question about zero capacity drew advice to change income or expenses.
+        if result.monthlyCapacityMinor == 0 {
+            return "Explain why your savings stay at their current level when income only matches expenses, and how far that leaves the balance from the target on the deadline."
+        }
+        if result.monthlyCapacityMinor < 0 {
             return "Explain what your monthly capacity does to your savings before the deadline, and what that means for this goal's target."
         }
         if result.remainingMinor == 0 {
-            return "Explain how your savings and monthly capacity keep this goal above its target on the deadline."
+            // Mentioning monthly capacity here led the model to invent a monthly deposit amount.
+            return "Explain what your savings being above the target today and the projected margin on the deadline mean together."
         }
         return "Explain how your monthly capacity compares with what this goal requires each month, and what that means for when the target is reached relative to the deadline."
     }
@@ -184,11 +213,13 @@ enum FinancialInsightContextBuilder {
     private static func goalConsiderationFocus(_ snapshot: GoalInsightSnapshot) -> String {
         let result = snapshot.result
         let money = moneyFormatter(snapshot.source.currencyCode)
+        // The summary already explains what the capacity does to savings; asking about the deficit
+        // again made the model repeat that sentence in both fields.
         if result.monthlyCapacityMinor < 0 {
-            return "what it means for this goal that expenses exceed income by \(money(-result.monthlyCapacityMinor)) each month."
+            return "why Foresight cannot project a completion date for this goal while your balance falls each month."
         }
         if result.monthlyCapacityMinor == 0 {
-            return "what happens to your savings over time while income only matches expenses."
+            return "why Foresight cannot project a completion date for this goal while income only matches expenses."
         }
         switch result.status {
         case .onTrack, .fundedNow:
@@ -196,8 +227,14 @@ enum FinancialInsightContextBuilder {
                 return "what the \(money(margin)) margin above the target at the deadline depends on, given that it assumes income and expenses stay as entered."
             }
             return "how much room this result has before it would slip, given that it assumes income and expenses stay as entered."
-        case .pastDeadline, .noContributionBeforeDeadline:
-            return "why current savings are the only thing that counts toward this deadline."
+        // The summary already explains why only current savings count, so the key point moves on.
+        case .pastDeadline:
+            return "why Foresight cannot project progress toward a deadline that has already passed."
+        case .noContributionBeforeDeadline:
+            if case .projected(_, let date) = result.completionProjection {
+                return "how the projected completion on \(formatted(date)) compares with the \(formatted(snapshot.source.inputs.targetDate)) deadline, since monthly deposits only start after it."
+            }
+            return "what your monthly capacity can and cannot change before this deadline."
         default:
             return "what the shortfall depends on: the gap between your capacity and the amount required, if income and expenses stay as entered."
         }
@@ -276,14 +313,21 @@ enum FinancialInsightContextBuilder {
                 relationships.append("Even without the purchase, the projected deadline balance is \(money(before)) below the target; with it, the gap is \(money(after)).")
             } else if missesAfter {
                 relationships.append("The purchase takes the goal from \(money(before)) above the target at the deadline to \(money(after)) below it.")
-            } else if let delay = result.purchaseDelay.monthCount, delay > 0 {
-                relationships.append("The goal still ends above the target at the deadline, by \(money(after)) instead of \(money(before)), but completion moves \(delay) \(delay == 1 ? "month" : "months") later.")
             } else {
-                relationships.append("The goal still ends above the target at the deadline, by \(money(after)) instead of \(money(before)), and the completion month does not change.")
+                // State the margin change itself: the model otherwise subtracted the two margins,
+                // once getting $1,450.00 for a $1,500.00 change.
+                let change = magnitude(of: before, minus: after).map { ", a fall of \(money($0))" } ?? ""
+                let completion = if let delay = result.purchaseDelay.monthCount, delay > 0 {
+                    "but completion moves \(delay) \(delay == 1 ? "month" : "months") later."
+                } else {
+                    "and the completion month does not change."
+                }
+                relationships.append("The goal still ends above the target at the deadline: the margin above the target goes from \(money(before)) without the purchase to \(money(after)) with it\(change), \(completion)")
             }
         }
         // The purchase is an immediate cost, so it lowers savings and the deadline balance by exactly its cost.
-        relationships.append("The purchase lowers both your savings and the projected deadline balance by its cost, \(money(snapshot.purchaseAmountMinor)).")
+        // It is a one-off cost: the model otherwise sometimes described it as lowering monthly capacity.
+        relationships.append("The purchase lowers both your savings and the projected deadline balance by its cost, \(money(snapshot.purchaseAmountMinor)). It is a one-off cost, so your \(money(result.baseline.monthlyCapacityMinor)) monthly capacity does not change.")
         // When the purchase causes the miss, its excess over the deadline-keeping limit is the key point.
         var considerationFocus = "why the remaining margin depends on income and expenses staying as entered."
         if missesBefore {
@@ -306,8 +350,10 @@ enum FinancialInsightContextBuilder {
                 "Being able to pay from savings is not a judgement that buying it is advisable.",
                 "Describe the effect on the goal; never describe the purchase itself as succeeding or failing."
             ],
+            // The cost against the deadline-keeping limit is the key consideration's point; asking the
+            // summary for it as well made the model state it in both fields.
             focus: missesAfter
-                ? "Explain the trade-off: what paying for this from savings does to the goal's deadline balance and completion, and how the cost compares with the largest purchase that keeps the deadline."
+                ? "Explain the trade-off: what paying for this from savings does to the goal's deadline balance and completion."
                 : "Explain the trade-off: what paying for this from savings does to the goal's margin above the target at the deadline and to its completion.",
             considerationFocus: considerationFocus,
             suggestions: purchaseSuggestions(snapshot),
@@ -367,12 +413,15 @@ enum FinancialInsightContextBuilder {
         ]
         let prefix = snapshot.includesPurchase ? "Without the purchase: " : ""
         if let cost = snapshot.context.purchase?.amountMinor {
-            facts.append(FinancialInsightFact(id: "cost", label: "Purchase cost", value: money(cost)))
+            facts.append(FinancialInsightFact(id: "cost", label: "Purchase cost (one-off)", value: money(cost)))
         }
-        facts.append(FinancialInsightFact(id: "baselineSuccess", label: snapshot.includesPurchase ? "Success without the purchase" : "Estimated success",
+        // Labelled as a share of paths so the model does not read it as a projection or a balance.
+        let share = "(share of simulated paths that reach the target)"
+        facts.append(FinancialInsightFact(id: "baselineSuccess",
+                                          label: snapshot.includesPurchase ? "Success without the purchase \(share)" : "Estimated success \(share)",
                                           value: success(snapshot.baselinePercentage, snapshot.baselineSuccessCount)))
         if let purchasePercentage = snapshot.purchasePercentage, let purchaseCount = snapshot.purchaseSuccessCount {
-            facts.append(FinancialInsightFact(id: "purchaseSuccess", label: "Success with the purchase",
+            facts.append(FinancialInsightFact(id: "purchaseSuccess", label: "Success with the purchase \(share)",
                                               value: success(purchasePercentage, purchaseCount)))
         }
         if let reduction = snapshot.reductionPercentagePoints {
@@ -382,13 +431,14 @@ enum FinancialInsightContextBuilder {
         if let purchaseDeadline = snapshot.purchaseDeadline {
             facts += percentiles("With the purchase: ", "purchase", purchaseDeadline)
         }
-        facts.append(FinancialInsightFact(id: "deterministicBaseline", label: "\(prefix)deadline balance if income and expenses stay as entered",
+        let single = "(one projection, not a simulated estimate)"
+        facts.append(FinancialInsightFact(id: "deterministicBaseline", label: "\(prefix)deadline balance if income and expenses stay as entered \(single)",
                                           value: money(snapshot.deterministicBaselineMinor)))
         if let deterministicPurchase = snapshot.deterministicPurchaseMinor {
-            facts.append(FinancialInsightFact(id: "deterministicPurchase", label: "With the purchase: deadline balance if income and expenses stay as entered",
+            facts.append(FinancialInsightFact(id: "deterministicPurchase", label: "With the purchase: deadline balance if income and expenses stay as entered \(single)",
                                               value: money(deterministicPurchase)))
         }
-        facts.append(FinancialInsightFact(id: "deposits", label: "Monthly deposits before the deadline", value: "\(snapshot.depositMonths)"))
+        facts.append(FinancialInsightFact(id: "deposits", label: "Number of monthly deposits before the deadline", value: "\(snapshot.depositMonths)"))
         facts.append(FinancialInsightFact(id: "incomeVariability", label: "Income variability",
                                           value: "up to \(snapshot.incomeVariability)% either way each month"))
         facts.append(FinancialInsightFact(id: "expenseVariability", label: "Expense variability",
@@ -399,18 +449,41 @@ enum FinancialInsightContextBuilder {
            let before = magnitude(of: snapshot.baselineDeadline.median, minus: target),
            let after = magnitude(of: purchaseDeadline.median, minus: target) {
             // One "from ... to ..." sentence; two separate median sentences were confused by the model.
-            relationships.append("The purchase moves the median simulated deadline balance from \(money(before)) \(snapshot.baselineDeadline.median >= target ? "above" : "below") the target to \(money(after)) \(purchaseDeadline.median >= target ? "above" : "below") it.")
+            // The shift itself is stated so the model never subtracts the two medians.
+            let shift = magnitude(of: snapshot.baselineDeadline.median, minus: purchaseDeadline.median)
+                .map { " by \(money($0))" } ?? ""
+            relationships.append("The purchase lowers the median simulated deadline balance\(shift): from \(money(before)) \(snapshot.baselineDeadline.median >= target ? "above" : "below") the target without the purchase to \(money(after)) \(purchaseDeadline.median >= target ? "above" : "below") it with the purchase.")
         } else {
             relationships.append(medianRelationship("The", median: snapshot.baselineDeadline.median, target: target, money: money))
         }
-        relationships += outcomeRelationships(prefix: snapshot.includesPurchase ? "Without the purchase, " : "",
-                                              count: snapshot.baselineSuccessCount, total: snapshot.simulationCount,
-                                              percentage: snapshot.baselinePercentage, target: target,
-                                              balances: snapshot.baselineDeadline)
-        if let purchaseCount = snapshot.purchaseSuccessCount, let purchaseDeadline = snapshot.purchaseDeadline,
-           let purchasePercentage = snapshot.purchasePercentage {
-            relationships += outcomeRelationships(prefix: "With the purchase, ", count: purchaseCount, total: snapshot.simulationCount,
-                                                  percentage: purchasePercentage, target: target, balances: purchaseDeadline)
+        if let edge = sharedEdgeOutcome(snapshot) {
+            // Identical "every path" or "no path" lines for both cases were copied into both fields.
+            relationships.append(edge
+                ? "Every simulated path reaches the target both with and without the purchase, so the purchase does not change success."
+                : "No simulated path reaches the target, with or without the purchase.")
+        } else {
+            // The same target position stated twice made the summary long and repetitive, so it is
+            // merged when both cases have one and it matches.
+            let total = snapshot.simulationCount
+            let sharedPosition: String? = if let purchaseCount = snapshot.purchaseSuccessCount,
+                let purchaseDeadline = snapshot.purchaseDeadline,
+                (1..<total).contains(snapshot.baselineSuccessCount), (1..<total).contains(purchaseCount),
+                targetPosition(target, snapshot.baselineDeadline) == targetPosition(target, purchaseDeadline) {
+                targetPosition(target, purchaseDeadline)
+            } else { nil }
+            relationships += outcomeRelationships(prefix: snapshot.includesPurchase ? "Without the purchase, " : "",
+                                                  count: snapshot.baselineSuccessCount, total: total,
+                                                  percentage: snapshot.baselinePercentage, target: target,
+                                                  balances: snapshot.baselineDeadline, includePosition: sharedPosition == nil)
+            if let purchaseCount = snapshot.purchaseSuccessCount, let purchaseDeadline = snapshot.purchaseDeadline,
+               let purchasePercentage = snapshot.purchasePercentage {
+                relationships += outcomeRelationships(prefix: "With the purchase, ", count: purchaseCount, total: total,
+                                                      percentage: purchasePercentage, target: target, balances: purchaseDeadline,
+                                                      includePosition: sharedPosition == nil)
+            }
+            if let sharedPosition {
+                relationships.append("Both with and without the purchase, \(sharedPosition)")
+            }
         }
         if snapshot.depositMonths == 0 {
             relationships.append("No monthly deposit occurs before the deadline, so variability has no effect; the result depends only on starting savings.")
@@ -426,30 +499,63 @@ enum FinancialInsightContextBuilder {
             facts: facts, relationships: relationships,
             rules: [
                 "Success means a simulated balance reaches the target on the deadline; it describes the goal, not the purchase.",
-                "A purchase is an immediate fixed cost applied to the same simulated paths.",
+                "A purchase is a one-off cost applied once to the same simulated paths; it does not change monthly income, expenses or capacity.",
+                "A success percentage is a share of simulated paths, not a projection. The balance if income and expenses stay as entered is a single separate projection.",
                 "P10, P50 and P90 are simulated deadline balances, not probabilities, and P10 and P90 are not worst or best cases.",
                 "These are simulated estimates under the chosen variability, not predictions."
             ],
-            focus: snapshot.includesPurchase
-                ? "Explain what the difference in success means, why the purchase has this effect on the simulated deadline balances, and how the spread of balances relates to the target."
-                : "Explain what the success estimate means and how the spread of simulated deadline balances relates to the target.",
-            considerationFocus: forecastConsiderationFocus(snapshot, money: money),
+            focus: forecastFocus(snapshot),
+            considerationFocus: forecastConsiderationFocus(snapshot),
             suggestions: forecastSuggestions(snapshot),
             uncertaintyNote: "Simulated estimates under your chosen variability. Percentages are rounded, and P10 and P90 are lower and higher simulated balances, not worst or best cases."
         )
     }
 
-    private static func forecastConsiderationFocus(_ snapshot: ForecastInsightSnapshot, money: (Int64) -> String) -> String {
-        let target = snapshot.context.inputs.targetMinor
+    // true when every path succeeds in both cases, false when none does; nil otherwise.
+    private static func sharedEdgeOutcome(_ snapshot: ForecastInsightSnapshot) -> Bool? {
+        guard let purchaseCount = snapshot.purchaseSuccessCount, purchaseCount == snapshot.baselineSuccessCount else { return nil }
+        if purchaseCount == snapshot.simulationCount { return true }
+        if purchaseCount == 0 { return false }
+        return nil
+    }
+
+    // When the purchase does not change how many paths succeed, there is no success difference
+    // to explain; the summary covers what the cost does to the balances instead.
+    private static func forecastFocus(_ snapshot: ForecastInsightSnapshot) -> String {
+        // "In terms of simulated paths": an open question drew "you are projected to fail", which
+        // presents a share of paths as a single projection.
+        guard let purchaseCount = snapshot.purchaseSuccessCount else {
+            return "Explain, in terms of simulated paths rather than a projection, what the success estimate means and how the spread of simulated deadline balances relates to the target."
+        }
+        if purchaseCount == snapshot.baselineSuccessCount {
+            return "Explain the trade-off: the purchase lowers the simulated deadline balances without changing how many paths reach the target, and what its cost does to the margin between the median balance and the target."
+        }
+        return "Explain, in terms of simulated paths rather than a projection, what the difference in success means, why the purchase has this effect on the simulated deadline balances, and how the spread of balances relates to the target."
+    }
+
+    private static func forecastConsiderationFocus(_ snapshot: ForecastInsightSnapshot) -> String {
         if snapshot.depositMonths == 0 {
             return "why only starting savings matter when no monthly deposit occurs before the deadline."
         }
         if snapshot.incomeVariability == 0, snapshot.expenseVariability == 0 {
-            return "why zero variability means this forecast shows no uncertainty."
+            return "why zero variability means every simulated path is identical, so this result only shows what happens if income and expenses stay exactly as entered."
         }
-        if let purchaseDeadline = snapshot.purchaseDeadline,
-           let gap = magnitude(of: purchaseDeadline.median, minus: target) {
-            return "how close the result with the purchase is to the target: its median simulated balance is \(money(gap)) \(purchaseDeadline.median >= target ? "above" : "below") the target."
+        // The summary already covers the median margin, so the key point is what the result rests on.
+        // A forecast without a purchase whose paths all succeed or all fall short is treated the same way;
+        // asking about sensitivity there made the model repeat its summary's variability sentence.
+        let baselineEdge: Bool? = snapshot.includesPurchase ? nil
+            : snapshot.baselineSuccessCount == snapshot.simulationCount ? true
+            : snapshot.baselineSuccessCount == 0 ? false : nil
+        if let edge = sharedEdgeOutcome(snapshot) ?? baselineEdge {
+            let range = "the simulated paths only vary income by up to \(snapshot.incomeVariability)% and expenses by up to \(snapshot.expenseVariability)% each month, so larger changes are not covered."
+            return edge
+                ? "why every simulated path reaching the target is not a promise: \(range)"
+                : "what this result depends on: \(range)"
+        }
+        // The summary's relationship already states the median gap with the purchase; asking for it
+        // again here led the model to repeat that sentence in both fields.
+        if snapshot.includesPurchase {
+            return "how the chosen variability of up to \(snapshot.incomeVariability)% for income and \(snapshot.expenseVariability)% for expenses shapes the change in success with the purchase."
         }
         return "how sensitive this estimate is to the chosen variability of up to \(snapshot.incomeVariability)% for income and \(snapshot.expenseVariability)% for expenses."
     }
@@ -464,7 +570,8 @@ enum FinancialInsightContextBuilder {
     // Exact counts at the edges and for rounded displays; otherwise the target's position among
     // the engine's own P10/P50/P90 balances (nearest-rank), with no new threshold.
     private static func outcomeRelationships(prefix: String, count: Int, total: Int, percentage: Int,
-                                             target: Int64, balances: ForecastPercentiles) -> [String] {
+                                             target: Int64, balances: ForecastPercentiles,
+                                             includePosition: Bool = true) -> [String] {
         if count == total { return [prefix.isEmpty ? "Every simulated path reaches the target." : prefix + "every simulated path reaches the target."] }
         if count == 0 { return [prefix.isEmpty ? "No simulated path reaches the target." : prefix + "no simulated path reaches the target."] }
         var lines: [String] = []
@@ -473,7 +580,15 @@ enum FinancialInsightContextBuilder {
                 ? "The displayed \(percentage)% is rounded: \(count.formatted()) of \(total.formatted()) paths reach the target."
                 : prefix + "the displayed \(percentage)% is rounded: \(count.formatted()) of \(total.formatted()) paths reach the target.")
         }
-        let position = if target <= balances.lower {
+        if includePosition {
+            let position = targetPosition(target, balances)
+            lines.append(prefix.isEmpty ? capitalized(position) : prefix + position)
+        }
+        return lines
+    }
+
+    private static func targetPosition(_ target: Int64, _ balances: ForecastPercentiles) -> String {
+        if target <= balances.lower {
             "the target is at or below the P10 balance, so most simulated paths reach it."
         } else if target <= balances.median {
             "the target is between the P10 and median balances, so about half or more of the simulated paths reach it."
@@ -482,8 +597,6 @@ enum FinancialInsightContextBuilder {
         } else {
             "the target is above the P90 balance, so few simulated paths reach it."
         }
-        lines.append(prefix.isEmpty ? capitalized(position) : prefix + position)
-        return lines
     }
 
     private static func forecastSuggestions(_ snapshot: ForecastInsightSnapshot) -> [FinancialInsightSuggestion] {

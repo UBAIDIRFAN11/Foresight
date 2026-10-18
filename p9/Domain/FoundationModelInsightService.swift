@@ -6,7 +6,8 @@ import FoundationModels
 @MainActor
 protocol FinancialInsightGenerating {
     func availability() -> FinancialInsightAvailability
-    func generate(for request: FinancialInsightRequest) async throws -> GeneratedFinancialInsight
+    func generate(for request: FinancialInsightRequest,
+                  sampling: FinancialInsightSampling) async throws -> GeneratedFinancialInsight
 }
 
 // On-device Foundation Models implementation. It receives copied values only and never
@@ -23,15 +24,38 @@ struct FoundationModelInsightService: FinancialInsightGenerating {
 
     Rules:
     - Quote only figures that appear in the prompt, copied exactly. Never calculate, estimate or invent \
-    a new amount, percentage, date or number of months, and write numbers as digits.
-    - Do not simply restate the status. Connect the relevant figures to explain cause and consequence.
+    a new amount, percentage, date or number of months, and write numbers as digits. If a comparison \
+    you want is not listed under relationships, describe it without a number.
+    - Keep each figure's meaning from its label: "above" is a surplus and "below" is a shortfall, and a \
+    figure labelled "without the purchase" never describes the result with the purchase.
+    - A purchase is a one-off cost: it lowers savings once and never changes monthly income, expenses \
+    or capacity.
+    - Success percentages are shares of simulated paths, not projections: write "X% of simulated paths \
+    reach the target", never "projected to reach" or "projected to be X%". P10, P50 and P90 are balances \
+    in money, never chances.
+    - Do not simply restate the status, and never contradict it. Connect the relevant figures to explain \
+    cause and consequence.
     - Address the user as "you". Use short, plain sentences.
-    - Use conditional language such as "under these assumptions". Never promise an outcome.
+    - For the target, deadline, balance or completion, say "is projected to" rather than "will", and use \
+    conditional language such as "under these assumptions". Never promise an outcome, even when every \
+    simulated path reaches the target.
     - Do not invent causes such as spending habits, and do not tell the user to buy, not buy, \
     or change their income or spending.
-    - The summary and the key consideration must make different points.
+    - The summary and the key consideration must make different points; do not repeat a sentence.
     - Choose nextStep only from the next steps listed in the prompt.
     """
+
+    // Retries only: modest nucleus sampling so a rejected response is not reproduced exactly,
+    // while still favouring the model's most likely wording.
+    static func options(for sampling: FinancialInsightSampling) -> GenerationOptions {
+        switch sampling {
+        case .deterministic:
+            GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 512)
+        case .varied:
+            GenerationOptions(samplingMode: .random(probabilityThreshold: 0.8), temperature: 0.5,
+                              maximumResponseTokens: 512)
+        }
+    }
 
     func availability() -> FinancialInsightAvailability {
         switch model.availability {
@@ -49,7 +73,8 @@ struct FoundationModelInsightService: FinancialInsightGenerating {
         }
     }
 
-    func generate(for request: FinancialInsightRequest) async throws -> GeneratedFinancialInsight {
+    func generate(for request: FinancialInsightRequest,
+                  sampling: FinancialInsightSampling) async throws -> GeneratedFinancialInsight {
         // Check immediately before generation, because availability can change while the app runs.
         guard availability() == .available else { throw FinancialInsightFailure.assetsUnavailable }
         // A fresh session per attempt: no transcript carries over between explanations or retries.
@@ -58,7 +83,7 @@ struct FoundationModelInsightService: FinancialInsightGenerating {
             let response = try await session.respond(
                 to: Self.prompt(for: request),
                 generating: GeneratedFinancialInsight.self,
-                options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 512)
+                options: Self.options(for: sampling)
             )
             return response.content
         } catch {
