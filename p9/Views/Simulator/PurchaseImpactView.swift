@@ -28,6 +28,7 @@ struct PurchaseImpactView: View {
     
     
     @State private var forecastSession: ForecastSession?
+    @State private var insightRequest: FinancialInsightRequest?
     @State private var amountDraft = ""
     @State private var amountError: String?
     @State private var sliderValue = 0.0
@@ -53,6 +54,11 @@ struct PurchaseImpactView: View {
                 purchaseCard
                 goalCard
                 impactRows
+                if case .live = mode {
+                    FinancialInsightButton(title: "Analyse this purchase with AI", isEnabled: liveResultIsCurrent) {
+                        insightRequest = try? FinancialInsightContextBuilder.purchaseRequest(evaluation: evaluation)
+                    }
+                }
 
                 if case .live(let isStale, let message) = mode, isStale {
                     // Stale live results are still visible, but cannot be saved.
@@ -106,6 +112,10 @@ struct PurchaseImpactView: View {
             ForecastFlowView(session: session, originIsCurrent: canForecast &&
                              session.context.purchase?.evaluationID == evaluation.id)
         }
+        .sheet(item: $insightRequest) { request in
+            FinancialInsightsSheet(request: request, sourceIsCurrent: purchaseInsightIsCurrent(request),
+                                   validateSource: { try validatePurchaseInsight(request) })
+        }
         .sheet(isPresented: $isShowingReminderSheet) {
             NavigationStack {
                 reminderSetupSheet
@@ -114,9 +124,25 @@ struct PurchaseImpactView: View {
         }
     }
 
-    private var canForecast: Bool {
+    private var canForecast: Bool { liveResultIsCurrent }
+
+    // A live result is current when it is not stale and the amount field still matches it.
+    private var liveResultIsCurrent: Bool {
         guard case .live(let isStale, _) = mode else { return false }
         return !isStale && amountError == nil && amountDraftMatchesEvaluation
+    }
+
+    // A different evaluation ID means the amount was re-evaluated after the request was made.
+    private func purchaseInsightIsCurrent(_ request: FinancialInsightRequest) -> Bool {
+        guard case .purchase(let snapshot) = request.context else { return false }
+        return snapshot.evaluationID == evaluation.id && liveResultIsCurrent
+    }
+
+    // Reuses the save-time freshness check; the AI path never saves anything.
+    private func validatePurchaseInsight(_ request: FinancialInsightRequest) throws {
+        guard case .purchase(let snapshot) = request.context,
+              snapshot.evaluationID == evaluation.id else { throw FinancialInsightStaleSourceError() }
+        try SavedDecisionStore.validateLive(evaluation, in: modelContext)
     }
 
     private var header: some View {

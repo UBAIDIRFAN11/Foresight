@@ -32,6 +32,9 @@ struct AboutView: View {
                     Text("Foresight was developed using Apple's SwiftUI for the user interface, SwiftData for local data persistence, Swift Charts for financial visualisations, and UserNotifications for reminders.")
                         .foregroundStyle(.secondary)
 
+                    Text("AI explanations are generated on device using Apple's Foundation Models framework. They interpret results Foresight has already calculated and may be incorrect.")
+                        .foregroundStyle(.secondary)
+
                     Text("Foreign-currency evaluations use dated exchange-rate information provided by [Frankfurter](https://frankfurter.dev/).")
                         .foregroundStyle(.secondary)
                         .tint(ForesightTheme.accent)

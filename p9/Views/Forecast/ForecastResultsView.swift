@@ -7,6 +7,7 @@ struct ForecastResultsView: View {
     let done: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var model = ForecastViewModel()
+    @State private var insightRequest: FinancialInsightRequest?
 
     var body: some View {
         ScrollView {
@@ -21,6 +22,11 @@ struct ForecastResultsView: View {
                         ForecastSummary(result: result)
                         ForecastChart(result: result)
                         ForecastDisclaimer()
+                        // Explains this retained result; it never runs another simulation.
+                        FinancialInsightButton(title: "Explain this forecast with AI",
+                                               isEnabled: (try? FinancialInsightContextBuilder.forecastSnapshot(result: result)) != nil) {
+                            insightRequest = try? FinancialInsightContextBuilder.forecastRequest(result: result)
+                        }
                         Button("Adjust Assumptions") { dismiss() }
                             .buttonStyle(.bordered).controlSize(.large)
                     case .failed(let message):
@@ -46,6 +52,20 @@ struct ForecastResultsView: View {
             await model.run(request, validateSource: validateSource)
         }
         .onDisappear { model.cancel() }
+        .sheet(item: $insightRequest) { insight in
+            FinancialInsightsSheet(request: insight, sourceIsCurrent: forecastInsightIsCurrent(insight),
+                                   validateSource: {
+                                       guard forecastInsightIsCurrent(insight) else { throw FinancialInsightStaleSourceError() }
+                                       try validateSource()
+                                   })
+        }
+    }
+
+    // The explanation must belong to this screen's completed request and a still-current source.
+    private func forecastInsightIsCurrent(_ insight: FinancialInsightRequest) -> Bool {
+        guard sourceIsCurrent, case .forecast(let snapshot) = insight.context,
+              case .completed(let result) = model.state else { return false }
+        return snapshot.requestID == request.id && result.request.id == request.id
     }
 
     private var loading: some View {

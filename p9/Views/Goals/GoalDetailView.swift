@@ -14,6 +14,7 @@ struct GoalDetailView: View {
 
     @Bindable var profile: FinancialProfile
     @State private var forecastSession: ForecastSession?
+    @State private var insightRequest: FinancialInsightRequest?
     @State private var isEditing = false
     @State private var isConfirmingDelete = false
     @State private var errorMessage: String?
@@ -45,6 +46,10 @@ struct GoalDetailView: View {
     var body: some View {
         Group {
             if let goal = goals.first {
+                // One evaluation shared by the detail rows and the AI explanation, so the
+                // explanation always describes exactly the figures shown on this screen.
+                let source = ForecastSource.context(profile: profile, goal: goal, evaluationDay: today)
+                let result = FinancialCalculator.evaluate(source.inputs)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         Text(goal.name)
@@ -58,7 +63,11 @@ struct GoalDetailView: View {
                             forecastSession = ForecastSession(context: ForecastSource.context(
                                 profile: profile, goal: goal, evaluationDay: today))
                         }
-                        detailRows(for: goal)
+                        detailRows(result)
+                        FinancialInsightButton(title: "Explain my goal with AI",
+                                               isEnabled: result.status != .invalidInputs && result.status != .overflow) {
+                            insightRequest = try? FinancialInsightContextBuilder.goalRequest(source: source, result: result)
+                        }
                         checkInSection(for: goal)
                         deleteButton
                         if let errorMessage {
@@ -107,25 +116,19 @@ struct GoalDetailView: View {
         .sheet(item: $forecastSession) { session in
             ForecastFlowView(session: session)
         }
+        .sheet(item: $insightRequest) { request in
+            FinancialInsightsSheet(request: request, sourceIsCurrent: goalInsightIsCurrent(request),
+                                   validateSource: { try validateGoalInsight(request) })
+        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
         }
     }
 
-    private func detailRows(for goal: FinancialGoal) -> some View {
+    private func detailRows(_ result: FinancialCalculationResult) -> some View {
         // Detail rows show the current profile's effect on this goal right now.
-        let result = FinancialCalculator.evaluate(
-            FinancialInputs(
-                savingsMinor: profile.currentSavingsMinor,
-                incomeMinor: profile.monthlyIncomeMinor,
-                expensesMinor: profile.recurringExpensesMinor,
-                targetMinor: goal.targetAmountMinor,
-                evaluationDate: today,
-                targetDate: goal.targetDate
-            )
-        )
-        return VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             AdaptiveValueRow(title: "Monthly capacity", value: MoneyFormatting.display(result.monthlyCapacityMinor, currencyCode: profile.preferredCurrencyCode))
             AdaptiveValueRow(title: "Remaining", value: MoneyFormatting.display(result.remainingMinor, currencyCode: profile.preferredCurrencyCode))
             AdaptiveValueRow(title: "Required each month", value: MoneyFormatting.display(result.monthlyRequiredMinor, currencyCode: profile.preferredCurrencyCode))
@@ -133,6 +136,18 @@ struct GoalDetailView: View {
             AdaptiveValueRow(title: "Deadline balance", value: MoneyFormatting.display(result.deadlineBalanceMinor, currencyCode: profile.preferredCurrencyCode))
         }
         .foresightCard()
+    }
+
+    // The explanation stays current only while the profile, goal and day still match its source.
+    // Deletion also makes it stale, because the goal query becomes empty.
+    private func goalInsightIsCurrent(_ request: FinancialInsightRequest) -> Bool {
+        guard case .goal(let snapshot) = request.context, let goal = goals.first else { return false }
+        return ForecastSource.context(profile: profile, goal: goal, evaluationDay: today) == snapshot.source
+    }
+
+    private func validateGoalInsight(_ request: FinancialInsightRequest) throws {
+        guard case .goal(let snapshot) = request.context else { throw FinancialInsightStaleSourceError() }
+        try ForecastSource.validate(snapshot.source, in: modelContext)
     }
 
     private func projectionSection(for goal: FinancialGoal) -> some View {
