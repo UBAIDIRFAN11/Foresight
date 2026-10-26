@@ -1,5 +1,7 @@
 import Foundation
 
+//parses user entered monetary amounts and formats them for disp
+
 nonisolated enum MoneyParseError: LocalizedError, Equatable {
     case empty
     case containsSymbolOrGrouping

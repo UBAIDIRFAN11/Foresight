@@ -1,17 +1,31 @@
 import Foundation
 
+//converts foreign currency into preferred currency using exchange rate data supplied by Frankfurter API
+
 nonisolated enum CurrencyConversion {
+    
+    //sourceMinor: purchase amount is orig. currency's minor units
+    //source: orig. currency def
+    //destination: profile preferred currency def
+    //rate: exchange rate returned by frankfurter
+    //availableSavings: user's savings in their profile's preferred currency minor units
     static func convert(
         _ sourceMinor: Int64, from source: CurrencyDefinition, to destination: CurrencyDefinition,
         rate: Decimal, availableSavings: Int64
     ) throws -> Int64 {
+        
+        //validate amount and rate
         guard sourceMinor > 0 else { throw PurchaseImpactError.invalidPurchaseAmount }
         guard !rate.isNaN, rate > 0 else { throw ExchangeRateError.invalidResponse }
+        
+        //perform the conversion
         var sourceValue = Decimal(sourceMinor)
         var sourceScale = Decimal(MoneyFormatting.pow10(source.minorUnitScale))
         var destinationScale = Decimal(MoneyFormatting.pow10(destination.minorUnitScale))
         var rate = rate
         var major = Decimal(), converted = Decimal(), minor = Decimal()
+        
+        //converted units = source units * rate
         guard NSDecimalDivide(&major, &sourceValue, &sourceScale, .plain) == .noError,
               NSDecimalMultiply(&converted, &major, &rate, .plain) == .noError,
               NSDecimalMultiply(&minor, &converted, &destinationScale, .plain) == .noError else {
@@ -22,7 +36,11 @@ nonisolated enum CurrencyConversion {
         NSDecimalRound(&rounded, &minor, 0, .plain)
         guard !rounded.isNaN, rounded <= Decimal(Int64.max) else { throw PurchaseImpactError.arithmeticOverflow }
         guard rounded >= 1 else { throw PurchaseImpactError.invalidPurchaseAmount }
+        
+        //affordability check is performed using the converted purcahse amount and the user's savings in the same currency
         guard rounded <= Decimal(availableSavings) else { throw PurchaseImpactError.insufficientSavings }
+        
+        //converted amount is returned at int64 minor units, ready for the purchase-impact calculation
         return NSDecimalNumber(decimal: rounded).int64Value
     }
 

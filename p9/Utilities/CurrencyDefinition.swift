@@ -1,15 +1,24 @@
 import Foundation
 
+//defines supported currencies and their decimal precision.
+
 nonisolated struct CurrencyDefinition: Identifiable, Hashable, Sendable {
+    
+    //the currency's 3-letter identifier, e.g. "AUD"
     let code: String
+    
+    //human readable name (needed for disp in currency picker)
     let name: String
+    
+    //no. d.p supported by that currency
     let minorUnitScale: Int
+    
+    //determines formatting convention used when disp that currency
     let localeIdentifier: String
 
     var id: String { code }
 
-    // minorUnitScale controls the number of decimal places accepted and displayed.
-    // JPY intentionally uses zero decimal places.
+    //simulator uses this arr to populate currency picker
     static let supported: [CurrencyDefinition] = [
         .init(code: "AUD", name: "Australian Dollar", minorUnitScale: 2, localeIdentifier: "en_AU"),
         .init(code: "USD", name: "US Dollar", minorUnitScale: 2, localeIdentifier: "en_US"),
@@ -20,6 +29,8 @@ nonisolated struct CurrencyDefinition: Identifiable, Hashable, Sendable {
         .init(code: "JPY", name: "Japanese Yen", minorUnitScale: 0, localeIdentifier: "ja_JP")
     ]
 
+    
+    //searches for matching currency definition, falls back to first supported currency when no match found.
     static func definition(for code: String) -> CurrencyDefinition {
         supported.first { $0.code == code } ?? supported[0]
     }

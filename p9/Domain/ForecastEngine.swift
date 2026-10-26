@@ -75,6 +75,8 @@ nonisolated enum ForecastEngine {
                     // Always consume four uniform draws, including zero amount/variability.
                     let income = try sample(input.incomeMinor, percent: assumptions.incomeVariability, generator: &generator)
                     let expenses = try sample(input.expensesMinor, percent: assumptions.expenseVariability, generator: &generator)
+                    
+                    //next balance = prev. balance + this month's income - this month's expenses
                     balances[path] = try add(balances[path], subtract(income, expenses))
                     if let purchase { _ = try subtract(balances[path], purchase) }
                 }

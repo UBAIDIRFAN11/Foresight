@@ -19,7 +19,9 @@ struct GoalEditorView: View {
     @FocusState private var focusedField: Field?
 
     private enum Field {
+        case name
         case targetAmount
+        case goalDescription
     }
 
     var body: some View {
@@ -27,6 +29,7 @@ struct GoalEditorView: View {
         Form {
             Section("Goal") {
                 TextField("Name", text: $name)
+                    .focused($focusedField, equals: .name)
                 LabeledContent("Target amount") {
                     TextField("0", text: $targetAmount)
                         .keyboardType(.decimalPad)
@@ -41,6 +44,7 @@ struct GoalEditorView: View {
                 DatePicker("Target date", selection: $targetDate, displayedComponents: .date)
                 TextField("Description", text: $goalDescription, axis: .vertical)
                     .lineLimit(3...)
+                    .focused($focusedField, equals: .goalDescription)
             }
 
             if let errorMessage {

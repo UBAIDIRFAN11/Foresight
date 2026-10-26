@@ -9,6 +9,7 @@ nonisolated struct ForecastPurchase: Equatable, Sendable {
     let rateDescription: String?
 }
 
+//a snapshot of the financial inputs, goal, currency, and opt. purchase
 nonisolated struct ForecastContext: Equatable, Sendable {
     let goalID: UUID
     let goalName: String
@@ -17,6 +18,7 @@ nonisolated struct ForecastContext: Equatable, Sendable {
     let purchase: ForecastPurchase?
 }
 
+//income/expense variability, simulation count, random seed and model version
 nonisolated struct ForecastAssumptions: Equatable, Sendable {
     static let model = "triangular-fixed-point-v1"
     let incomeVariability: Int
@@ -36,6 +38,7 @@ nonisolated struct ForecastAssumptions: Equatable, Sendable {
     }
 }
 
+//the context and assumptions packaged with a request ID
 nonisolated struct ForecastRequest: Identifiable, Equatable, Sendable {
     let id: UUID
     let context: ForecastContext
@@ -68,6 +71,7 @@ nonisolated struct ForecastSample: Identifiable, Equatable, Sendable {
     var id: Date { date }
 }
 
+//monthly percentile summaries, success counts, and deterministic comparison
 nonisolated struct ForecastResult: Equatable, Sendable {
     let request: ForecastRequest
     let samples: [ForecastSample]

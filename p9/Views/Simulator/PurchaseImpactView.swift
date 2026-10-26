@@ -95,6 +95,14 @@ struct PurchaseImpactView: View {
         .background(ForesightTheme.background)
         .navigationTitle("Purchase Impact")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    focusedField = nil
+                }
+            }
+        }
         .onAppear {
             syncAmountDraft(forceDraftUpdate: true)
         }

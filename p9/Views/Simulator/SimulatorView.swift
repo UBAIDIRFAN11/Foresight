@@ -16,11 +16,15 @@ struct SimulatorView: View {
     @State private var hasInitializedSelection = false
     @State private var purchaseName = ""
     @State private var amount = ""
+    
+    //store selected currency and request state
     @State private var purchaseCurrencyCode: String
     @State private var lookupTask: Task<Void, Never>?
     @State private var requestID: UUID?
     @State private var isLoadingRate = false
     @State private var errorMessage: String?
+    
+    
     // The current unsaved calculation result, if the user has calculated one.
     @State private var evaluation: PurchaseImpactEvaluation?
     @State private var isShowingResult = false
@@ -50,6 +54,7 @@ struct SimulatorView: View {
     }
 
     private enum Field {
+        case purchaseName
         case amount
     }
 
@@ -91,6 +96,7 @@ struct SimulatorView: View {
                             .foregroundStyle(.secondary)
                         TextField("Coffee machine", text: $purchaseName)
                             .textFieldStyle(.roundedBorder)
+                            .focused($focusedField, equals: .purchaseName)
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Amount")
@@ -101,6 +107,8 @@ struct SimulatorView: View {
                             .textFieldStyle(.roundedBorder)
                             .focused($focusedField, equals: .amount)
                     }
+                    
+                    //disp currency picker
                     Picker("Purchase currency", selection: Binding(
                         get: { purchaseCurrencyCode },
                         set: { currency in
@@ -352,14 +360,21 @@ struct SimulatorView: View {
             targetDate: goal.targetDate
         )
         let goalID = goal.id, goalName = goal.name
+        
+        //define which currencies to convert between
         let sourceCurrency = purchaseCurrencyCode, destinationCurrency = profile.preferredCurrencyCode
         let draftAmount = amount, draftName = purchaseName
+        
+        //start the async task
         let token = UUID()
         requestID = token
         isLoadingRate = sourceCurrency != destinationCurrency
         errorMessage = nil
+        //main actor ensures the state updates inside it happen on the main actor
         lookupTask = Task { @MainActor in
             do {
+                
+                //fetch exchange rate
                 let quote = try await FrankfurterClient().fetchRate(from: sourceCurrency, to: destinationCurrency)
                 try Task.checkCancellation()
                 guard requestID == token else { return }

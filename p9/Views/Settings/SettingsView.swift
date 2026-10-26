@@ -25,7 +25,7 @@ struct SettingsView: View {
                     Label("About", systemImage: "info.circle")
                 }
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.primary)
         }
         .scrollContentBackground(.hidden)
         .background(ForesightTheme.background)
