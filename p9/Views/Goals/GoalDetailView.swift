@@ -16,6 +16,10 @@ struct GoalDetailView: View {
     @State private var forecastSession: ForecastSession?
     @State private var insightRequest: FinancialInsightRequest?
     @State private var isEditing = false
+    @AccessibilityFocusState private var editFocused: Bool
+    @AccessibilityFocusState private var forecastFocused: Bool
+    @AccessibilityFocusState private var insightFocused: Bool
+    @State private var errorAttempt = 0
     @State private var isConfirmingDelete = false
     @State private var errorMessage: String?
     @State private var reminderError: String?
@@ -53,27 +57,27 @@ struct GoalDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         Text(goal.name)
+                            .accessibilityAddTraits(.isHeader)
                             .font(.largeTitle.weight(.bold))
                             .fixedSize(horizontal: false, vertical: true)
                         GoalCard(goal: goal, profile: profile, today: today, showsNavigationIndicator: false)
                         
                         //place the chart on the screen
                         projectionSection(for: goal)
-                        ForecastCallout(isEnabled: true) {
+                        ForecastCallout(isEnabled: true, accessibilityFocus: $forecastFocused) {
                             forecastSession = ForecastSession(context: ForecastSource.context(
                                 profile: profile, goal: goal, evaluationDay: today))
                         }
                         detailRows(result)
                         FinancialInsightButton(title: "Explain my goal with AI",
-                                               isEnabled: result.status != .invalidInputs && result.status != .overflow) {
+                                               isEnabled: result.status != .invalidInputs && result.status != .overflow,
+                                               accessibilityFocus: $insightFocused) {
                             insightRequest = try? FinancialInsightContextBuilder.goalRequest(source: source, result: result)
                         }
                         checkInSection(for: goal)
                         deleteButton
                         if let errorMessage {
-                            Text(errorMessage)
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(ForesightTheme.warning)
+                            AccessibleErrorSummary(message: errorMessage, attempt: errorAttempt)
                         }
                     }
                     .foresightReadableContent()
@@ -85,9 +89,11 @@ struct GoalDetailView: View {
                         Button("Edit") {
                             isEditing = true
                         }
+                        .accessibilityLabel("Edit \(goal.name)")
+                        .accessibilityFocused($editFocused)
                     }
                 }
-                .sheet(isPresented: $isEditing) {
+                .sheet(isPresented: $isEditing, onDismiss: { editFocused = true }) {
                     NavigationStack {
                         GoalEditorView(profile: profile, goal: goal, evaluationDay: evaluationDay)
                     }
@@ -113,12 +119,15 @@ struct GoalDetailView: View {
                 .background(ForesightTheme.background)
             }
         }
-        .sheet(item: $forecastSession) { session in
+        .sheet(item: $forecastSession, onDismiss: { forecastFocused = true }) { session in
             ForecastFlowView(session: session)
         }
-        .sheet(item: $insightRequest) { request in
+        .sheet(item: $insightRequest, onDismiss: { insightFocused = true }) { request in
             FinancialInsightsSheet(request: request, sourceIsCurrent: goalInsightIsCurrent(request),
                                    validateSource: { try validateGoalInsight(request) })
+        }
+        .onChange(of: reminderCoordinator.schedulingError) { _, message in
+            if let message { AccessibilityNotification.Announcement(message).post() }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
@@ -129,11 +138,11 @@ struct GoalDetailView: View {
     private func detailRows(_ result: FinancialCalculationResult) -> some View {
         // Detail rows show the current profile's effect on this goal right now.
         VStack(alignment: .leading, spacing: 12) {
-            AdaptiveValueRow(title: "Monthly capacity", value: MoneyFormatting.display(result.monthlyCapacityMinor, currencyCode: profile.preferredCurrencyCode))
-            AdaptiveValueRow(title: "Remaining", value: MoneyFormatting.display(result.remainingMinor, currencyCode: profile.preferredCurrencyCode))
-            AdaptiveValueRow(title: "Required each month", value: MoneyFormatting.display(result.monthlyRequiredMinor, currencyCode: profile.preferredCurrencyCode))
+            AdaptiveValueRow(title: "Monthly capacity", value: MoneyFormatting.display(result.monthlyCapacityMinor, currencyCode: profile.preferredCurrencyCode), spokenValue: AccessibilityMoney.spoken(result.monthlyCapacityMinor, currencyCode: profile.preferredCurrencyCode))
+            AdaptiveValueRow(title: "Remaining", value: MoneyFormatting.display(result.remainingMinor, currencyCode: profile.preferredCurrencyCode), spokenValue: AccessibilityMoney.spoken(result.remainingMinor, currencyCode: profile.preferredCurrencyCode))
+            AdaptiveValueRow(title: "Required each month", value: MoneyFormatting.display(result.monthlyRequiredMinor, currencyCode: profile.preferredCurrencyCode), spokenValue: AccessibilityMoney.spoken(result.monthlyRequiredMinor, currencyCode: profile.preferredCurrencyCode))
             AdaptiveValueRow(title: "Completion date", value: completionDateText(result.completionProjection))
-            AdaptiveValueRow(title: "Deadline balance", value: MoneyFormatting.display(result.deadlineBalanceMinor, currencyCode: profile.preferredCurrencyCode))
+            AdaptiveValueRow(title: "Deadline balance", value: MoneyFormatting.display(result.deadlineBalanceMinor, currencyCode: profile.preferredCurrencyCode), spokenValue: AccessibilityMoney.spoken(result.deadlineBalanceMinor, currencyCode: profile.preferredCurrencyCode))
         }
         .foresightCard()
     }
@@ -164,6 +173,7 @@ struct GoalDetailView: View {
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Savings Projection")
+                    .accessibilityAddTraits(.isHeader)
                     .font(.headline)
                 Spacer(minLength: 12)
                 Text(windowLabel)
@@ -294,6 +304,7 @@ struct GoalDetailView: View {
     private func checkInSection(for goal: FinancialGoal) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Weekly Check-In")
+                .accessibilityAddTraits(.isHeader)
                 .font(.headline)
             Toggle("Remind me to review this goal", isOn: reminderBinding(for: goal))
             if reminderEnabled {
@@ -383,6 +394,7 @@ struct GoalDetailView: View {
         } catch {
             loadReminderDraft(for: goal)
             reminderError = error.localizedDescription
+            AccessibilityNotification.Announcement(error.localizedDescription).post()
         }
     }
 
@@ -406,6 +418,7 @@ struct GoalDetailView: View {
             // Roll back so a failed delete does not leave the context half-changed.
             modelContext.rollback()
             errorMessage = error.localizedDescription
+            errorAttempt += 1
         }
     }
 

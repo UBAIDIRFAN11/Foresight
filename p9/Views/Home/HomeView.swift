@@ -30,6 +30,7 @@ struct HomeView: View {
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Your Current Focus")
+                        .accessibilityAddTraits(.isHeader)
                         .font(.headline)
                     if sortedGoals.count > 1 {
                         Picker("Focus Goal", selection: $focus.selectedID) {
@@ -44,6 +45,7 @@ struct HomeView: View {
                             GoalCard(goal: focusedGoal, profile: profile, today: today)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityHint("Opens goal details.")
                     } else {
                         emptyFocus
                     }
@@ -59,9 +61,11 @@ struct HomeView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .foresightPrimaryAction()
+                .accessibilityHint("Opens the Simulator with your current focus goal.")
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Recent Decisions")
+                        .accessibilityAddTraits(.isHeader)
                         .font(.headline)
                     if let latestDecision = savedDecisions.first {
                         // Recent Decisions reuses the same read-only result view as History.
@@ -88,6 +92,7 @@ struct HomeView: View {
                             recentDecisionRow(latestDecision)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityHint("Opens the saved purchase analysis.")
                     } else {
                         Text("Saved purchase decisions will appear here after you calculate and save an impact.")
                             .foregroundStyle(.secondary)
@@ -113,6 +118,7 @@ struct HomeView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Foresight")
+                .accessibilityAddTraits(.isHeader)
                 .font(.largeTitle.weight(.bold))
             Text("Plan today. A brighter tomorrow.")
                 .font(.title3)
@@ -127,6 +133,7 @@ struct HomeView: View {
 
         return layout {
             Image(systemName: "chart.bar")
+                .accessibilityHidden(true)
                 .font(.largeTitle)
                 .foregroundStyle(ForesightTheme.accent)
             VStack(alignment: .leading, spacing: 4) {
@@ -144,15 +151,18 @@ struct HomeView: View {
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Monthly savings capacity")
+                .accessibilityValue("\(AccessibilityMoney.spoken(capacity, currencyCode: profile.preferredCurrencyCode)) per month")
 
                 VStack(alignment: .leading, spacing: 4) {
                     AdaptiveValueRow(
                         title: "Income",
-                        value: MoneyFormatting.display(profile.monthlyIncomeMinor, currencyCode: profile.preferredCurrencyCode)
+                        value: MoneyFormatting.display(profile.monthlyIncomeMinor, currencyCode: profile.preferredCurrencyCode), spokenValue: AccessibilityMoney.spoken(profile.monthlyIncomeMinor, currencyCode: profile.preferredCurrencyCode)
                     )
                     AdaptiveValueRow(
                         title: "Expenses",
-                        value: MoneyFormatting.display(profile.recurringExpensesMinor, currencyCode: profile.preferredCurrencyCode)
+                        value: MoneyFormatting.display(profile.recurringExpensesMinor, currencyCode: profile.preferredCurrencyCode), spokenValue: AccessibilityMoney.spoken(profile.recurringExpensesMinor, currencyCode: profile.preferredCurrencyCode)
                     )
                 }
                 .font(.caption)
@@ -172,6 +182,7 @@ struct HomeView: View {
     private var emptyFocus: some View {
         VStack(alignment: .leading, spacing: 10) {
             Image(systemName: "flag")
+                .accessibilityHidden(true)
                 .font(.title)
                 .foregroundStyle(ForesightTheme.accent)
             Text("Add a goal to see whether your current savings plan is on track.")
@@ -189,12 +200,13 @@ struct HomeView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
+                    .accessibilityHidden(true)
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
             AdaptiveValueRow(
                 title: decision.goalName,
-                value: MoneyFormatting.display(decision.purchaseAmountMinor, currencyCode: decision.currencyCode)
+                value: MoneyFormatting.display(decision.purchaseAmountMinor, currencyCode: decision.currencyCode), spokenValue: AccessibilityMoney.spoken(decision.purchaseAmountMinor, currencyCode: decision.currencyCode)
             )
             Text(decisionImpactText(decision))
                 .font(.footnote)

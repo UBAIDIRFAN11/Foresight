@@ -35,9 +35,11 @@ struct ContentView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         Image(systemName: "exclamationmark.triangle")
+                            .accessibilityHidden(true)
                             .font(.largeTitle)
                             .foregroundStyle(ForesightTheme.warning)
                         Text("Foresight could not open your local data.")
+                            .accessibilityAddTraits(.isHeader)
                             .font(.headline)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
@@ -96,6 +98,7 @@ struct ContentView: View {
             }
         } catch {
             loadState = .failed(message: error.localizedDescription)
+            AccessibilityNotification.Announcement("Foresight could not open your local data. \(error.localizedDescription)").post()
         }
     }
 

@@ -19,6 +19,9 @@ struct FinancialProfileView: View {
     @State private var recurringExpenses = ""
     @State private var currencyCode = "AUD"
     @State private var errorMessage: String?
+    @State private var failedField: MoneyField?
+    @State private var errorAttempt = 0
+    @AccessibilityFocusState private var accessibleField: MoneyField?
     @State private var hasLoadedDraft = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .title) private var iconWidth = 42
@@ -28,6 +31,14 @@ struct FinancialProfileView: View {
         case currentSavings
         case monthlyIncome
         case recurringExpenses
+
+        var title: String {
+            switch self {
+            case .currentSavings: "Current Savings"
+            case .monthlyIncome: "Monthly Income"
+            case .recurringExpenses: "Recurring Expenses"
+            }
+        }
     }
 
     init(mode: Mode, onProfileSaved: ((FinancialProfile) -> Void)? = nil) {
@@ -40,6 +51,7 @@ struct FinancialProfileView: View {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Financial Profile")
+                        .accessibilityAddTraits(.isHeader)
                         .font(.largeTitle.weight(.bold))
                     Text("Tell us about your finances to calculate your savings capacity. Your data stays on this device.")
                         .foregroundStyle(.secondary)
@@ -83,6 +95,9 @@ struct FinancialProfileView: View {
                             .foregroundStyle(ForesightTheme.accent)
                     }
                 }
+                .accessibilityLabel("Preferred currency")
+                .accessibilityValue("\(selectedCurrency.name)")
+                .accessibilityHint("Changing currency clears the entered amounts.")
                 .disabled(isCurrencyLocked)
                 .foresightCard()
 
@@ -99,9 +114,10 @@ struct FinancialProfileView: View {
                 }
 
                 if let errorMessage {
-                    Text(errorMessage)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(ForesightTheme.warning)
+                    AccessibleErrorSummary(message: errorMessage, fieldName: failedField?.title, attempt: errorAttempt,
+                                           recover: failedField.map { field in
+                                               { focusedField = field; accessibleField = field }
+                                           })
                 }
 
                 Button(action: save) {
@@ -183,6 +199,9 @@ struct FinancialProfileView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Estimated monthly savings")
+        .accessibilityValue("\(AccessibilityMoney.spoken(capacity, currencyCode: currencyCode)) per month. Based on your income and expenses.")
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(ForesightTheme.savingsSurface)
@@ -204,6 +223,7 @@ struct FinancialProfileView: View {
                 .font(.title)
                 .foregroundStyle(ForesightTheme.accent)
                 .frame(width: iconWidth, alignment: .center)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
                     .font(.subheadline)
@@ -212,6 +232,8 @@ struct FinancialProfileView: View {
                     .keyboardType(.decimalPad)
                     .font(.title3.weight(.semibold))
                     .focused($focusedField, equals: field(for: title))
+                    .accessibilityLabel("\(title), \(selectedCurrency.name)")
+                    .accessibilityFocused($accessibleField, equals: field(for: title))
             }
         }
         .foresightCard()
@@ -246,16 +268,24 @@ struct FinancialProfileView: View {
     }
 
     private func save() {
+        focusedField = nil
+        failedField = nil
+        defer { if errorMessage != nil { errorAttempt += 1 } }
         do {
             // Guard again at save time in case goals appeared while this screen was open.
             if case .editing(let profile) = mode, profile.preferredCurrencyCode != currencyCode, !goals.isEmpty {
                 errorMessage = "Remove all goals before changing currency."
                 return
             }
+            failedField = .currentSavings
             let savings = try MoneyFormatting.parseMinorUnits(currentSavings, currency: selectedCurrency)
+            failedField = .monthlyIncome
             let income = try MoneyFormatting.parseMinorUnits(monthlyIncome, currency: selectedCurrency)
+            failedField = .recurringExpenses
             let expenses = try MoneyFormatting.parseMinorUnits(recurringExpenses, currency: selectedCurrency)
 
+            failedField = nil
+            errorMessage = nil
             switch mode {
             case .onboarding:
                 // Onboarding creates the first profile if one still does not exist.

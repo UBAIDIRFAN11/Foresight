@@ -22,6 +22,7 @@ struct RemindersSettingsView: View {
                         reminderCoordinator.reconcile(in: modelContext, globallyPaused: $0, requestAuthorizationIfNeeded: !$0)
                     }
                 ))
+                .accessibilityHint("Pauses delivery while keeping your reminder schedules.")
                 AdaptiveValueRow(title: "Permission", value: reminderCoordinator.deliverySettings.summary)
                 if reminderCoordinator.deliverySettings.permissionState == .denied {
                     Button {
@@ -60,6 +61,9 @@ struct RemindersSettingsView: View {
         .scrollContentBackground(.hidden)
         .background(ForesightTheme.background)
         .navigationTitle("Reminders")
+        .onChange(of: reminderCoordinator.schedulingError) { _, message in
+            if let message { AccessibilityNotification.Announcement(message).post() }
+        }
         .onAppear {
             reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
         }
@@ -76,6 +80,7 @@ struct RemindersSettingsView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(statusColor(for: reminder))
             }
+            .accessibilityElement(children: .combine)
             Text(scheduleText(for: reminder))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -87,6 +92,7 @@ struct RemindersSettingsView: View {
                     Label("Disable Reminder", systemImage: "bell.slash")
                 }
                 .buttonStyle(.bordered)
+                .accessibilityLabel("Disable reminder for \(rowTitle(for: reminder))")
             }
         }
         .padding(.vertical, 4)
@@ -134,6 +140,7 @@ struct RemindersSettingsView: View {
             reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
         } catch {
             errorMessage = error.localizedDescription
+            AccessibilityNotification.Announcement(error.localizedDescription).post()
         }
     }
 }

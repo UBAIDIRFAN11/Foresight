@@ -89,6 +89,7 @@ struct ProfileView: View {
         VStack(alignment: .leading, spacing: 14) {
 
             Label("Planning overview", systemImage: "chart.bar.xaxis")
+                .accessibilityAddTraits(.isHeader)
                 .font(.headline)
                 .foregroundStyle(ForesightTheme.accent)
 
@@ -154,6 +155,7 @@ struct ProfileView: View {
                 .labelsHidden()
                 .tint(ForesightTheme.accent)
                 .disabled(goals.isEmpty)
+                .accessibilityHint("Sets the default goal shown on Home.")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -180,6 +182,7 @@ struct ProfileView: View {
                     errorMessage = nil
                 } catch {
                     errorMessage = "Could not save your preference. \(error.localizedDescription)"
+                    if let errorMessage { AccessibilityNotification.Announcement(errorMessage).post() }
                 }
             }
         )

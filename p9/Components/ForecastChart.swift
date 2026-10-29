@@ -169,7 +169,10 @@ struct ForecastChart: View {
         .frame(height: 260)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Simulated savings ranges")
-        .accessibilityValue("Use the scenario selector and Previous Month or Next Month buttons below to inspect exact balances.")
+        .accessibilityValue(accessibilitySummary)
+        .accessibilityHint(context.purchase == nil
+            ? "Use Previous Month or Next Month below to inspect exact balances."
+            : "Use the scenario selector and Previous Month or Next Month below to inspect exact balances.")
     }
 
 
@@ -197,6 +200,13 @@ struct ForecastChart: View {
     }
 
 
+    private var accessibilitySummary: String {
+        guard let selected else { return "No month selected." }
+        let values = withPurchase ? (selected.afterPurchase ?? selected.baseline) : selected.baseline
+        let date = displayDate(selected.date).formatted(date: .abbreviated, time: .omitted)
+        return "\(withPurchase ? "With purchase" : "Baseline"), \(date). Lower \(AccessibilityMoney.spoken(values.lower, currencyCode: context.currencyCode)). Median \(AccessibilityMoney.spoken(values.median, currencyCode: context.currencyCode)). Upper \(AccessibilityMoney.spoken(values.upper, currencyCode: context.currencyCode))."
+    }
+
     private var chartSelection: Binding<Date?> {
         Binding(
             get: { selectedDate },
@@ -220,9 +230,9 @@ struct ForecastChart: View {
                 Text("\(withPurchase ? "With Purchase" : "Baseline") · \(displayDate(selected.date).formatted(date: .abbreviated, time: .omitted))")
                     .font(.headline)
                     .accessibilityAddTraits(.isHeader)
-                AdaptiveValueRow(title: "Lower (10th percentile)", value: money(values.lower))
-                AdaptiveValueRow(title: "Median (50th percentile)", value: money(values.median))
-                AdaptiveValueRow(title: "Upper (90th percentile)", value: money(values.upper))
+                AdaptiveValueRow(title: "Lower (10th percentile)", value: money(values.lower), spokenValue: AccessibilityMoney.spoken(values.lower, currencyCode: context.currencyCode))
+                AdaptiveValueRow(title: "Median (50th percentile)", value: money(values.median), spokenValue: AccessibilityMoney.spoken(values.median, currencyCode: context.currencyCode))
+                AdaptiveValueRow(title: "Upper (90th percentile)", value: money(values.upper), spokenValue: AccessibilityMoney.spoken(values.upper, currencyCode: context.currencyCode))
                 ViewThatFits(in: .horizontal) {
                     HStack { previousButton; Spacer(); nextButton }
                     VStack(alignment: .leading) { previousButton; nextButton }

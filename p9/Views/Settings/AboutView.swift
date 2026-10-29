@@ -13,6 +13,7 @@ struct AboutView: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Foresight")
+                        .accessibilityAddTraits(.isHeader)
                         .font(.largeTitle.weight(.bold))
                     Text("Version \(versionText)")
                         .foregroundStyle(.secondary)
@@ -27,6 +28,7 @@ struct AboutView: View {
                 aboutSection("Purpose", "Foresight is a personal financial planning app to help you set goals, make well-informed decisions, and bring your dreams closer.")
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Technologies & Acknowledgements")
+                        .accessibilityAddTraits(.isHeader)
                         .font(.headline)
 
                     Text("Foresight was developed using Apple's SwiftUI for the user interface, SwiftData for local data persistence, Swift Charts for financial visualisations, and UserNotifications for reminders.")
@@ -39,7 +41,7 @@ struct AboutView: View {
                         .foregroundStyle(.secondary)
                         .tint(ForesightTheme.accent)
 
-                    Text("The application icon was created with assistance from OpenAI's image generation tools.")
+                    Text("The application icon was generated using the app icon generator on [appicon.co](https://appicon.co).")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -56,6 +58,7 @@ struct AboutView: View {
     private func aboutSection(_ title: String, _ body: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
+                .accessibilityAddTraits(.isHeader)
                 .font(.headline)
             Text(body)
                 .foregroundStyle(.secondary)

@@ -68,6 +68,7 @@ struct ForesightPrimaryActionModifier: ViewModifier {
 struct AdaptiveValueRow: View {
     let title: String
     let value: String
+    var spokenValue: String? = nil
 
     var body: some View {
         // Try a compact horizontal row first, then stack vertically when text is large.
@@ -86,6 +87,9 @@ struct AdaptiveValueRow: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(spokenValue ?? value)
     }
 
     private var titleText: some View {

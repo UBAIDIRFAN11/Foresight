@@ -31,6 +31,13 @@ struct PurchaseImpactView: View {
     @State private var insightRequest: FinancialInsightRequest?
     @State private var amountDraft = ""
     @State private var amountError: String?
+    @State private var showsAmountRecovery = false
+    @State private var amountErrorAttempt = 0
+    @State private var saveErrorAttempt = 0
+    @AccessibilityFocusState private var amountFocused: Bool
+    @AccessibilityFocusState private var forecastFocused: Bool
+    @AccessibilityFocusState private var insightFocused: Bool
+    @AccessibilityFocusState private var reminderFocused: Bool
     @State private var sliderValue = 0.0
     @State private var visibleStartMonth = 0
     @State private var selectedChartDate: Date?
@@ -46,7 +53,7 @@ struct PurchaseImpactView: View {
                 consequenceCard
                 liveProjectionSection
                 if case .live = mode {
-                    ForecastCallout(isEnabled: canForecast) {
+                    ForecastCallout(isEnabled: canForecast, accessibilityFocus: $forecastFocused) {
                         forecastSession = ForecastSession(context: ForecastSource.context(evaluation: evaluation))
                     }
                 }
@@ -55,7 +62,7 @@ struct PurchaseImpactView: View {
                 goalCard
                 impactRows
                 if case .live = mode {
-                    FinancialInsightButton(title: "Analyse this purchase with AI", isEnabled: liveResultIsCurrent) {
+                    FinancialInsightButton(title: "Analyse this purchase with AI", isEnabled: liveResultIsCurrent, accessibilityFocus: $insightFocused) {
                         insightRequest = try? FinancialInsightContextBuilder.purchaseRequest(evaluation: evaluation)
                     }
                 }
@@ -69,10 +76,7 @@ struct PurchaseImpactView: View {
                 }
 
                 if let saveError {
-                    Label(saveError, systemImage: "exclamationmark.triangle")
-                        .font(.footnote)
-                        .foregroundStyle(ForesightTheme.warning)
-                        .fixedSize(horizontal: false, vertical: true)
+                    AccessibleErrorSummary(message: saveError, attempt: saveErrorAttempt)
                 }
 
                 if let reminderError {
@@ -93,6 +97,9 @@ struct PurchaseImpactView: View {
             .foresightReadableContent()
         }
         .background(ForesightTheme.background)
+        .onChange(of: reminderCoordinator.schedulingError) { _, message in
+            if let message { AccessibilityNotification.Announcement(message).post() }
+        }
         .navigationTitle("Purchase Impact")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -112,19 +119,24 @@ struct PurchaseImpactView: View {
             syncAmountDraft()
         }
         .onChange(of: focusedField) { oldValue, newValue in
-            if oldValue == .amount, newValue != .amount, amountError == nil {
-                syncAmountDraft(forceDraftUpdate: true)
+            if oldValue == .amount, newValue != .amount {
+                if amountError == nil {
+                    syncAmountDraft(forceDraftUpdate: true)
+                } else {
+                    showsAmountRecovery = true
+                    amountErrorAttempt += 1
+                }
             }
         }
-        .sheet(item: $forecastSession) { session in
+        .sheet(item: $forecastSession, onDismiss: { forecastFocused = true }) { session in
             ForecastFlowView(session: session, originIsCurrent: canForecast &&
                              session.context.purchase?.evaluationID == evaluation.id)
         }
-        .sheet(item: $insightRequest) { request in
+        .sheet(item: $insightRequest, onDismiss: { insightFocused = true }) { request in
             FinancialInsightsSheet(request: request, sourceIsCurrent: purchaseInsightIsCurrent(request),
                                    validateSource: { try validatePurchaseInsight(request) })
         }
-        .sheet(isPresented: $isShowingReminderSheet) {
+        .sheet(isPresented: $isShowingReminderSheet, onDismiss: { reminderFocused = true }) {
             NavigationStack {
                 reminderSetupSheet
             }
@@ -156,6 +168,7 @@ struct PurchaseImpactView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(evaluation.purchaseName)
+                .accessibilityAddTraits(.isHeader)
                 .font(.largeTitle.weight(.bold))
                 .fixedSize(horizontal: false, vertical: true)
             Text("Evaluated \(formatted(evaluation.evaluationDate))")
@@ -173,6 +186,7 @@ struct PurchaseImpactView: View {
     private var consequenceCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(consequenceTitle, systemImage: consequenceIcon)
+                .accessibilityAddTraits(.isHeader)
                 .font(.headline)
                 .foregroundStyle(consequenceColor)
             Text(consequenceMessage)
@@ -186,14 +200,15 @@ struct PurchaseImpactView: View {
     private var purchaseCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Purchase")
+                .accessibilityAddTraits(.isHeader)
                 .font(.headline)
             if case .saved = mode {
-                AdaptiveValueRow(title: "Amount", value: MoneyFormatting.display(evaluation.purchaseAmountMinor, currencyCode: evaluation.currencyCode))
+                AdaptiveValueRow(title: "Amount", value: MoneyFormatting.display(evaluation.purchaseAmountMinor, currencyCode: evaluation.currencyCode), spokenValue: AccessibilityMoney.spoken(evaluation.purchaseAmountMinor, currencyCode: evaluation.currencyCode))
             }
             if let conversion = evaluation.conversion {
                 ConversionSummary(conversion: conversion, convertedMinor: evaluation.purchaseAmountMinor)
             }
-            AdaptiveValueRow(title: "Remaining savings", value: MoneyFormatting.display(evaluation.result.remainingSavingsMinor, currencyCode: evaluation.currencyCode))
+            AdaptiveValueRow(title: "Remaining savings", value: MoneyFormatting.display(evaluation.result.remainingSavingsMinor, currencyCode: evaluation.currencyCode), spokenValue: AccessibilityMoney.spoken(evaluation.result.remainingSavingsMinor, currencyCode: evaluation.currencyCode))
             AdaptiveValueRow(title: "Currency", value: evaluation.currencyCode)
         }
         .foresightCard()
@@ -213,6 +228,7 @@ struct PurchaseImpactView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Projection")
+                        .accessibilityAddTraits(.isHeader)
                         .font(.headline)
                     Spacer(minLength: 12)
                     Text("Months \(visibleStartMonth)-\(visibleStartMonth + FinancialProjectionBuilder.defaultVisibleMonthCount)")
@@ -250,6 +266,7 @@ struct PurchaseImpactView: View {
         if case .live = mode {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Adjust Purchase")
+                    .accessibilityAddTraits(.isHeader)
                     .font(.headline)
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -260,6 +277,9 @@ struct PurchaseImpactView: View {
                         .keyboardType(.decimalPad)
                         .textFieldStyle(.roundedBorder)
                         .focused($focusedField, equals: .amount)
+                        .accessibilityLabel("Exact purchase amount, \(AccessibilityMoney.currencyName(evaluation.originalCurrencyCode))")
+                        .accessibilityHint(amountError ?? "Recalculates the impact as you edit.")
+                        .accessibilityFocused($amountFocused)
                 }
 
                 if canUseSlider {
@@ -268,6 +288,9 @@ struct PurchaseImpactView: View {
                         in: Double(sliderMinimumMinor)...Double(sliderMaximumMinor),
                         step: 1
                     )
+                    .accessibilityLabel("Purchase amount")
+                    .accessibilityValue(AccessibilityMoney.spoken(Int64(sliderBinding.wrappedValue), currencyCode: evaluation.originalCurrencyCode))
+                    .accessibilityHint("Recalculates the purchase impact.")
                     HStack {
                         Text(MoneyFormatting.display(sliderMinimumMinor, currencyCode: evaluation.originalCurrencyCode))
                         Spacer()
@@ -283,10 +306,19 @@ struct PurchaseImpactView: View {
                 }
 
                 if let amountError {
-                    Label(amountError, systemImage: "exclamationmark.triangle")
-                        .font(.footnote)
-                        .foregroundStyle(ForesightTheme.warning)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if showsAmountRecovery {
+                        AccessibleErrorSummary(message: amountError, fieldName: "Exact purchase amount", attempt: amountErrorAttempt) {
+                            showsAmountRecovery = false
+                            focusedField = .amount
+                            amountFocused = true
+                        }
+                    } else {
+                        // Visible and discoverable during typing, without interrupting it.
+                        Label(amountError, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(ForesightTheme.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .foresightCard()
@@ -296,9 +328,10 @@ struct PurchaseImpactView: View {
     private var goalCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Goal")
+                .accessibilityAddTraits(.isHeader)
                 .font(.headline)
             AdaptiveValueRow(title: "Name", value: evaluation.goalName)
-            AdaptiveValueRow(title: "Target", value: MoneyFormatting.display(evaluation.goalTargetMinor, currencyCode: evaluation.currencyCode))
+            AdaptiveValueRow(title: "Target", value: MoneyFormatting.display(evaluation.goalTargetMinor, currencyCode: evaluation.currencyCode), spokenValue: AccessibilityMoney.spoken(evaluation.goalTargetMinor, currencyCode: evaluation.currencyCode))
             AdaptiveValueRow(title: "Deadline", value: formatted(evaluation.goalTargetDate))
         }
         .foresightCard()
@@ -307,14 +340,15 @@ struct PurchaseImpactView: View {
     private var impactRows: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Impact")
+                .accessibilityAddTraits(.isHeader)
                 .font(.headline)
             AdaptiveValueRow(title: "Before purchase", value: completionDateText(evaluation.result.baseline.completionProjection))
             AdaptiveValueRow(title: "After purchase", value: completionDateText(evaluation.result.afterPurchase.completionProjection))
             AdaptiveValueRow(title: "Completion delay", value: metricText(evaluation.result.purchaseDelay))
-            AdaptiveValueRow(title: "Extra monthly savings", value: moneyMetricText(evaluation.result.extraMonthlySavings))
-            AdaptiveValueRow(title: "Deadline-safe purchase", value: moneyMetricText(evaluation.result.maximumPurchasePreservingDeadline))
-            AdaptiveValueRow(title: "Deadline balance before", value: MoneyFormatting.display(evaluation.result.deadlineBalanceBeforeMinor, currencyCode: evaluation.currencyCode))
-            AdaptiveValueRow(title: "Deadline balance after", value: MoneyFormatting.display(evaluation.result.deadlineBalanceAfterMinor, currencyCode: evaluation.currencyCode))
+            AdaptiveValueRow(title: "Extra monthly savings", value: moneyMetricText(evaluation.result.extraMonthlySavings), spokenValue: spokenMetric(evaluation.result.extraMonthlySavings))
+            AdaptiveValueRow(title: "Deadline-safe purchase", value: moneyMetricText(evaluation.result.maximumPurchasePreservingDeadline), spokenValue: spokenMetric(evaluation.result.maximumPurchasePreservingDeadline))
+            AdaptiveValueRow(title: "Deadline balance before", value: MoneyFormatting.display(evaluation.result.deadlineBalanceBeforeMinor, currencyCode: evaluation.currencyCode), spokenValue: AccessibilityMoney.spoken(evaluation.result.deadlineBalanceBeforeMinor, currencyCode: evaluation.currencyCode))
+            AdaptiveValueRow(title: "Deadline balance after", value: MoneyFormatting.display(evaluation.result.deadlineBalanceAfterMinor, currencyCode: evaluation.currencyCode), spokenValue: AccessibilityMoney.spoken(evaluation.result.deadlineBalanceAfterMinor, currencyCode: evaluation.currencyCode))
         }
         .foresightCard()
     }
@@ -341,7 +375,7 @@ struct PurchaseImpactView: View {
                     try SavedDecisionStore.validateLive(evaluation, in: modelContext)
                     saveError = nil
                     isShowingReminderSheet = true
-                } catch { saveError = error.localizedDescription }
+                } catch { saveError = error.localizedDescription; saveErrorAttempt += 1 }
             } label: {
                 Label("Save & Remind Me", systemImage: "bell.badge")
                     .font(.headline)
@@ -351,6 +385,7 @@ struct PurchaseImpactView: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
             .disabled(isStale || amountError != nil || !amountDraftMatchesEvaluation)
+            .accessibilityFocused($reminderFocused)
 
             if isStale {
                 Button {
@@ -371,6 +406,7 @@ struct PurchaseImpactView: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Reminder")
+                    .accessibilityAddTraits(.isHeader)
                     .font(.headline)
                 Text(reminderStatusText)
                     .font(.subheadline)
@@ -385,6 +421,7 @@ struct PurchaseImpactView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
+                .accessibilityFocused($reminderFocused)
 
                 if let activeReminder {
                     Button(role: .destructive) {
@@ -425,6 +462,7 @@ struct PurchaseImpactView: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
             .disabled(currentDecision == nil)
+            .accessibilityHint("Loads this purchase into the Simulator using your current profile. You will be asked before replacing an unsaved draft.")
         }
     }
 
@@ -526,6 +564,7 @@ struct PurchaseImpactView: View {
             onSaved?(decision)
         } catch {
             saveError = "Could not save this decision. \(error.localizedDescription)"
+            saveErrorAttempt += 1
         }
     }
 
@@ -564,6 +603,7 @@ struct PurchaseImpactView: View {
             if case .live = mode { onSaved?(decision) }
         } catch {
             reminderError = currentDecision == nil ? error.localizedDescription : "Decision saved. Reminder was not saved: \(error.localizedDescription) Retry here; the decision will not be duplicated."
+            if let reminderError { AccessibilityNotification.Announcement(reminderError).post() }
         }
     }
 
@@ -574,6 +614,7 @@ struct PurchaseImpactView: View {
             reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
         } catch {
             reminderError = error.localizedDescription
+            if let reminderError { AccessibilityNotification.Announcement(reminderError).post() }
         }
     }
 
@@ -584,6 +625,7 @@ struct PurchaseImpactView: View {
             reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)
         } catch {
             reminderError = error.localizedDescription
+            if let reminderError { AccessibilityNotification.Announcement(reminderError).post() }
         }
     }
 
@@ -654,6 +696,13 @@ struct PurchaseImpactView: View {
         case .unavailable(let reason):
             unavailableText(reason)
         }
+    }
+
+    private func spokenMetric(_ metric: PurchaseImpactMetric) -> String {
+        if case .amount(let amount) = metric {
+            return AccessibilityMoney.spoken(amount, currencyCode: evaluation.currencyCode)
+        }
+        return moneyMetricText(metric)
     }
 
     private func moneyMetricText(_ metric: PurchaseImpactMetric) -> String {
@@ -753,6 +802,7 @@ struct PurchaseImpactView: View {
     }
 
     private func amountDraftChanged(_ newValue: String) {
+        showsAmountRecovery = false
         amountDraft = newValue
         let currency = CurrencyDefinition.definition(for: evaluation.originalCurrencyCode)
         do {
@@ -861,8 +911,8 @@ private struct ConversionSummary: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            AdaptiveValueRow(title: "Original price", value: MoneyFormatting.display(conversion.originalAmountMinor, currencyCode: conversion.exchangeRate.base, includeCode: true))
-            AdaptiveValueRow(title: "Converted cost", value: MoneyFormatting.display(convertedMinor, currencyCode: conversion.exchangeRate.quote, includeCode: true))
+            AdaptiveValueRow(title: "Original price", value: MoneyFormatting.display(conversion.originalAmountMinor, currencyCode: conversion.exchangeRate.base, includeCode: true), spokenValue: AccessibilityMoney.spoken(conversion.originalAmountMinor, currencyCode: conversion.exchangeRate.base))
+            AdaptiveValueRow(title: "Converted cost", value: MoneyFormatting.display(convertedMinor, currencyCode: conversion.exchangeRate.quote, includeCode: true), spokenValue: AccessibilityMoney.spoken(convertedMinor, currencyCode: conversion.exchangeRate.quote))
             Text("1 \(conversion.exchangeRate.base) = \(conversion.exchangeRate.rateString) \(conversion.exchangeRate.quote)")
                 .font(.footnote)
             Text("Dated exchange-rate information · \(FinancialCalendar.displayDate(fromUTCNoon: conversion.exchangeRate.observationDate).formatted(date: .abbreviated, time: .omitted))")

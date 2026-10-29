@@ -131,7 +131,10 @@ struct SavingsProjectionChart: View {
                 }
             }
             .frame(height: 260)
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel(projection.hasComparison ? "Savings projection comparison chart" : "Savings projection chart")
+            .accessibilityValue(accessibilitySummary)
+            .accessibilityHint("Use Previous month or Next month below to inspect balances.")
 
             inspector
             navigationControls
@@ -141,6 +144,15 @@ struct SavingsProjectionChart: View {
                 selectedDate = projection.samples.first?.date
             }
         }
+    }
+
+    private var accessibilitySummary: String {
+        guard let sample = selectedSample else { return "No month selected." }
+        var summary = "\(formatted(sample.date)). \(baselineLabel) \(AccessibilityMoney.spoken(sample.baselineBalanceMinor, currencyCode: currencyCode))."
+        if let after = sample.afterPurchaseBalanceMinor {
+            summary += " After purchase \(AccessibilityMoney.spoken(after, currencyCode: currencyCode))."
+        }
+        return summary
     }
 
     private var chartXDomain: ClosedRange<Date> {
@@ -194,6 +206,7 @@ struct SavingsProjectionChart: View {
             }
             .stroke(color, style: StrokeStyle(lineWidth: 2.5, dash: dash))
             .frame(width: 32, height: 12)
+            .accessibilityHidden(true)
             Text(title)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -202,16 +215,17 @@ struct SavingsProjectionChart: View {
     private var inspector: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(selectedSample.map { formatted($0.date) } ?? "No month selected")
+                .accessibilityAddTraits(.isHeader)
                 .font(.headline)
             if let selectedSample {
                 AdaptiveValueRow(
                     title: projection.hasComparison ? "Baseline balance" : "Balance",
-                    value: MoneyFormatting.display(selectedSample.baselineBalanceMinor, currencyCode: currencyCode)
+                    value: MoneyFormatting.display(selectedSample.baselineBalanceMinor, currencyCode: currencyCode), spokenValue: AccessibilityMoney.spoken(selectedSample.baselineBalanceMinor, currencyCode: currencyCode)
                 )
                 if let afterPurchaseBalanceMinor = selectedSample.afterPurchaseBalanceMinor {
                     AdaptiveValueRow(
                         title: "After purchase",
-                        value: MoneyFormatting.display(afterPurchaseBalanceMinor, currencyCode: currencyCode)
+                        value: MoneyFormatting.display(afterPurchaseBalanceMinor, currencyCode: currencyCode), spokenValue: AccessibilityMoney.spoken(afterPurchaseBalanceMinor, currencyCode: currencyCode)
                     )
                 }
                 if selectedSample.isDeadline {

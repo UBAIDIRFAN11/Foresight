@@ -15,6 +15,7 @@ struct ForecastSession: Identifiable {
 
 struct ForecastCallout: View {
     let isEnabled: Bool
+    var accessibilityFocus: AccessibilityFocusState<Bool>.Binding
     let open: () -> Void
 
     var body: some View {
@@ -28,6 +29,8 @@ struct ForecastCallout: View {
                    action: open)
                 .foresightPrimaryAction()
                 .disabled(!isEnabled)
+                .accessibilityFocused(accessibilityFocus)
+                .accessibilityHint("Opens assumptions for simulated income and expense variation.")
         }
         .frame(maxWidth: .infinity)
         .foresightCard()
@@ -49,6 +52,7 @@ struct ForecastFlowView: View {
     @State private var invalidated = false
     @State private var evaluationDay = FinancialCalendar.localEvaluationDay()
     @State private var errorMessage: String?
+    @State private var errorAttempt = 0
 
     private var sourceMatches: Bool {
         guard originIsCurrent,
@@ -68,7 +72,7 @@ struct ForecastFlowView: View {
                     } else {
                         assumptions
                         if let errorMessage {
-                            Text(errorMessage).foregroundStyle(ForesightTheme.warning)
+                            AccessibleErrorSummary(message: errorMessage, attempt: errorAttempt)
                         }
                         Button("Run Forecast", systemImage: "play.fill", action: run)
                             .foresightPrimaryAction()
@@ -92,6 +96,9 @@ struct ForecastFlowView: View {
         }
         .onChange(of: sourceMatches, initial: true) { _, matches in
             if !matches { invalidated = true }
+        }
+        .onChange(of: invalidated) { _, isInvalid in
+            if isInvalid { AccessibilityNotification.Announcement(ForecastError.staleSource.localizedDescription).post() }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshSource() }
@@ -145,7 +152,7 @@ struct ForecastFlowView: View {
             showsResults = true
         } catch {
             if error as? ForecastError == .staleSource { invalidated = true }
-            else { errorMessage = error.localizedDescription }
+            else { errorMessage = error.localizedDescription; errorAttempt += 1 }
         }
     }
 }
@@ -179,17 +186,17 @@ struct ForecastContextCard: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(context.goalName).font(.title2.bold())
                 .accessibilityAddTraits(.isHeader)
-            AdaptiveValueRow(title: "Target", value: money(context.inputs.targetMinor))
+            AdaptiveValueRow(title: "Target", value: money(context.inputs.targetMinor), spokenValue: AccessibilityMoney.spoken(context.inputs.targetMinor, currencyCode: context.currencyCode))
             AdaptiveValueRow(title: "Deadline", value: FinancialCalendar.displayDate(fromUTCNoon: context.inputs.targetDate).formatted(date: .abbreviated, time: .omitted))
-            AdaptiveValueRow(title: "Current savings", value: money(context.inputs.savingsMinor))
-            AdaptiveValueRow(title: "Monthly income", value: money(context.inputs.incomeMinor))
-            AdaptiveValueRow(title: "Monthly expenses", value: money(context.inputs.expensesMinor))
+            AdaptiveValueRow(title: "Current savings", value: money(context.inputs.savingsMinor), spokenValue: AccessibilityMoney.spoken(context.inputs.savingsMinor, currencyCode: context.currencyCode))
+            AdaptiveValueRow(title: "Monthly income", value: money(context.inputs.incomeMinor), spokenValue: AccessibilityMoney.spoken(context.inputs.incomeMinor, currencyCode: context.currencyCode))
+            AdaptiveValueRow(title: "Monthly expenses", value: money(context.inputs.expensesMinor), spokenValue: AccessibilityMoney.spoken(context.inputs.expensesMinor, currencyCode: context.currencyCode))
             AdaptiveValueRow(title: "Currency", value: context.currencyCode)
             if let purchase = context.purchase {
                 Divider()
                 Text(purchase.name).font(.headline)
                     .accessibilityAddTraits(.isHeader)
-                AdaptiveValueRow(title: "Purchase cost", value: money(purchase.amountMinor))
+                AdaptiveValueRow(title: "Purchase cost", value: money(purchase.amountMinor), spokenValue: AccessibilityMoney.spoken(purchase.amountMinor, currencyCode: context.currencyCode))
                 if let rate = purchase.rateDescription {
                     Text("Original cost: \(MoneyFormatting.display(purchase.originalAmountMinor, currencyCode: purchase.originalCurrencyCode))")
                     Text(rate).font(.footnote).foregroundStyle(.secondary)

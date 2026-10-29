@@ -13,6 +13,7 @@ struct HistoryView: View {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("History")
+                        .accessibilityAddTraits(.isHeader)
                         .font(.largeTitle.weight(.bold))
                     Text("Your saved hypothetical decisions.")
                         .font(.title3)
@@ -29,12 +30,14 @@ struct HistoryView: View {
                     ForEach(groupedDecisions, id: \.month) { group in
                         VStack(alignment: .leading, spacing: 10) {
                             Text(group.month)
+                                .accessibilityAddTraits(.isHeader)
                                 .font(.headline)
                             ForEach(group.decisions) { decision in
                                 NavigationLink(value: decision.evaluationID) {
                                     decisionRow(decision)
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityHint("Opens the original saved purchase analysis.")
                             }
                         }
                     }
@@ -91,6 +94,7 @@ struct HistoryView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 Text(MoneyFormatting.display(decision.purchaseAmountMinor, currencyCode: decision.currencyCode))
+                    .accessibilityLabel(AccessibilityMoney.spoken(decision.purchaseAmountMinor, currencyCode: decision.currencyCode))
                     .font(.headline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)

@@ -5,6 +5,7 @@ import SwiftUI
 struct FinancialInsightButton: View {
     let title: String
     var isEnabled = true
+    var accessibilityFocus: AccessibilityFocusState<Bool>.Binding
     let action: () -> Void
 
     var body: some View {
@@ -18,6 +19,7 @@ struct FinancialInsightButton: View {
         .controlSize(.large)
         .tint(ForesightTheme.accent)
         .disabled(!isEnabled)
+        .accessibilityFocused(accessibilityFocus)
         .accessibilityHint("Opens an on-device AI explanation of this result.")
     }
 }

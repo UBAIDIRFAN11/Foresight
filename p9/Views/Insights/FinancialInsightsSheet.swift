@@ -65,6 +65,17 @@ struct FinancialInsightsSheet: View {
                 recheckSource()
             }
         }
+        .onChange(of: model.state) { _, state in
+            switch state {
+            case .unavailable(let availability):
+                AccessibilityNotification.Announcement("\(availability.title). \(availability.message)").post()
+            case .failed(let failure):
+                AccessibilityNotification.Announcement(failure.message).post()
+            case .stale:
+                AccessibilityNotification.Announcement(FinancialInsightStaleSourceError().localizedDescription).post()
+            default: break
+            }
+        }
         .onDisappear { model.cancel() }
     }
 
@@ -91,6 +102,7 @@ struct FinancialInsightsSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Key consideration")
+                        .accessibilityAddTraits(.isHeader)
                         .font(.subheadline.weight(.semibold))
                     Text(insight.keyConsideration)
                         .fixedSize(horizontal: false, vertical: true)
@@ -146,6 +158,7 @@ struct FinancialInsightsSheet: View {
     private func problem(title: String, message: String, actionTitle: String?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Label(title, systemImage: "exclamationmark.triangle")
+                .accessibilityAddTraits(.isHeader)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(ForesightTheme.warning)
             Text(message)

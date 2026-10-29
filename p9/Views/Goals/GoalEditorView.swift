@@ -15,6 +15,9 @@ struct GoalEditorView: View {
     @State private var targetDate = Date.distantFuture
     @State private var goalDescription = ""
     @State private var errorMessage: String?
+    @State private var failedField: Field?
+    @State private var errorAttempt = 0
+    @AccessibilityFocusState private var accessibleField: Field?
     @State private var loaded = false
     @FocusState private var focusedField: Field?
 
@@ -22,6 +25,14 @@ struct GoalEditorView: View {
         case name
         case targetAmount
         case goalDescription
+
+        var title: String {
+            switch self {
+            case .name: "Goal name"
+            case .targetAmount: "Target amount"
+            case .goalDescription: "Description"
+            }
+        }
     }
 
     var body: some View {
@@ -30,10 +41,15 @@ struct GoalEditorView: View {
             Section("Goal") {
                 TextField("Name", text: $name)
                     .focused($focusedField, equals: .name)
+                    .accessibilityLabel("Goal name")
+                    .accessibilityFocused($accessibleField, equals: .name)
                 LabeledContent("Target amount") {
                     TextField("0", text: $targetAmount)
                         .keyboardType(.decimalPad)
                         .focused($focusedField, equals: .targetAmount)
+                        // LabeledContent already supplies "Target amount" to this field.
+                        .accessibilityLabel(AccessibilityMoney.currencyName(profile.preferredCurrencyCode))
+                        .accessibilityFocused($accessibleField, equals: .targetAmount)
                         .multilineTextAlignment(.trailing)
                 }
                 Picker("Priority", selection: $priority) {
@@ -49,8 +65,10 @@ struct GoalEditorView: View {
 
             if let errorMessage {
                 Section {
-                    Text(errorMessage)
-                        .foregroundStyle(ForesightTheme.warning)
+                    AccessibleErrorSummary(message: errorMessage, fieldName: failedField?.title, attempt: errorAttempt,
+                                           recover: failedField.map { field in
+                                               { focusedField = field; accessibleField = field }
+                                           })
                 }
             }
         }
@@ -94,6 +112,9 @@ struct GoalEditorView: View {
     }
 
     private func save() {
+        focusedField = nil
+        failedField = .name
+        defer { if errorMessage != nil { errorAttempt += 1 } }
         do {
             // Validate and parse before writing anything to SwiftData.
             let cleanedName = FinancialFormValidation.cleanName(name)
@@ -101,12 +122,14 @@ struct GoalEditorView: View {
                 errorMessage = message
                 return
             }
+            failedField = .targetAmount
             let target = try MoneyFormatting.parseMinorUnits(targetAmount, currency: CurrencyDefinition.definition(for: profile.preferredCurrencyCode))
             if let message = FinancialFormValidation.validateGoalTarget(target) {
                 errorMessage = message
                 return
             }
 
+            failedField = nil
             if let goal {
                 // Editing mutates the existing SwiftData model.
                 goal.priority = priority
@@ -127,6 +150,7 @@ struct GoalEditorView: View {
                 )
             }
             try modelContext.save()
+            errorMessage = nil
             dismiss()
         } catch {
             // Failed saves should not leave partial draft data in the context.

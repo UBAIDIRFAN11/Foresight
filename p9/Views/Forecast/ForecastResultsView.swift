@@ -8,6 +8,7 @@ struct ForecastResultsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var model = ForecastViewModel()
     @State private var insightRequest: FinancialInsightRequest?
+    @AccessibilityFocusState private var insightFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -24,7 +25,8 @@ struct ForecastResultsView: View {
                         ForecastDisclaimer()
                         // Explains this retained result; it never runs another simulation.
                         FinancialInsightButton(title: "Explain this forecast with AI",
-                                               isEnabled: (try? FinancialInsightContextBuilder.forecastSnapshot(result: result)) != nil) {
+                                               isEnabled: (try? FinancialInsightContextBuilder.forecastSnapshot(result: result)) != nil,
+                                               accessibilityFocus: $insightFocused) {
                             insightRequest = try? FinancialInsightContextBuilder.forecastRequest(result: result)
                         }
                         Button("Adjust Assumptions") { dismiss() }
@@ -52,7 +54,14 @@ struct ForecastResultsView: View {
             await model.run(request, validateSource: validateSource)
         }
         .onDisappear { model.cancel() }
-        .sheet(item: $insightRequest) { insight in
+        .onChange(of: model.state) { _, state in
+            switch state {
+            case .failed(let message): AccessibilityNotification.Announcement(message).post()
+            case .stale: AccessibilityNotification.Announcement(ForecastError.staleSource.localizedDescription).post()
+            default: break
+            }
+        }
+        .sheet(item: $insightRequest, onDismiss: { insightFocused = true }) { insight in
             FinancialInsightsSheet(request: insight, sourceIsCurrent: forecastInsightIsCurrent(insight),
                                    validateSource: {
                                        guard forecastInsightIsCurrent(insight) else { throw FinancialInsightStaleSourceError() }
@@ -113,9 +122,9 @@ private struct ForecastSummary: View {
             Divider()
             Text("If monthly amounts stay unchanged").font(.headline)
                 .accessibilityAddTraits(.isHeader)
-            AdaptiveValueRow(title: "Baseline deadline balance", value: money(result.deterministicBaselineMinor))
+            AdaptiveValueRow(title: "Baseline deadline balance", value: money(result.deterministicBaselineMinor), spokenValue: AccessibilityMoney.spoken(result.deterministicBaselineMinor, currencyCode: context.currencyCode))
             if let after = result.deterministicPurchaseMinor {
-                AdaptiveValueRow(title: "With purchase", value: money(after))
+                AdaptiveValueRow(title: "With purchase", value: money(after), spokenValue: AccessibilityMoney.spoken(after, currencyCode: context.currencyCode))
             }
             if result.depositMonths == 0 {
                 Text("No monthly deposit occurs before this deadline, so variability has no effect. The outcome depends on starting savings.")

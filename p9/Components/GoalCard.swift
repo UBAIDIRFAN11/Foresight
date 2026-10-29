@@ -93,6 +93,22 @@ struct GoalCard: View {
             .foregroundStyle(.secondary)
         }
         .foresightCard()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(goal.name)
+        .accessibilityValue(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        let status: String
+        switch result.status {
+        case .fundedNow, .onTrack: status = "On Track"
+        default: status = "At Risk"
+        }
+        let currency = profile.preferredCurrencyCode
+        let savings = AccessibilityMoney.spoken(profile.currentSavingsMinor, currencyCode: currency)
+        let target = AccessibilityMoney.spoken(goal.targetAmountMinor, currencyCode: currency)
+        let progress = result.progress.formatted(.percent.precision(.fractionLength(0)))
+        return "\(goal.priority.title) priority. \(savings) saved of \(target). \(progress) complete. Deadline \(formattedTargetDate). \(status)."
     }
 
     private var iconName: String {

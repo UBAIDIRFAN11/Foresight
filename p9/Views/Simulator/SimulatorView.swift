@@ -23,6 +23,9 @@ struct SimulatorView: View {
     @State private var requestID: UUID?
     @State private var isLoadingRate = false
     @State private var errorMessage: String?
+    @State private var failedField: Field?
+    @State private var errorAttempt = 0
+    @AccessibilityFocusState private var accessibleField: Field?
     
     
     // The current unsaved calculation result, if the user has calculated one.
@@ -56,6 +59,15 @@ struct SimulatorView: View {
     private enum Field {
         case purchaseName
         case amount
+        case goal
+
+        var title: String {
+            switch self {
+            case .purchaseName: "Purchase name"
+            case .amount: "Amount"
+            case .goal: "Goal"
+            }
+        }
     }
 
     var body: some View {
@@ -63,6 +75,7 @@ struct SimulatorView: View {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Simulator")
+                        .accessibilityAddTraits(.isHeader)
                         .font(.largeTitle.weight(.bold))
                     Text("Big purchases. Smarter decisions.")
                         .font(.title3)
@@ -84,11 +97,13 @@ struct SimulatorView: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .accessibilityFocused($accessibleField, equals: .goal)
                     .foresightCard()
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Purchase Details")
+                        .accessibilityAddTraits(.isHeader)
                         .font(.headline)
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Purchase name")
@@ -97,6 +112,8 @@ struct SimulatorView: View {
                         TextField("Coffee machine", text: $purchaseName)
                             .textFieldStyle(.roundedBorder)
                             .focused($focusedField, equals: .purchaseName)
+                            .accessibilityLabel("Purchase name")
+                            .accessibilityFocused($accessibleField, equals: .purchaseName)
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Amount")
@@ -106,6 +123,8 @@ struct SimulatorView: View {
                             .keyboardType(.decimalPad)
                             .textFieldStyle(.roundedBorder)
                             .focused($focusedField, equals: .amount)
+                            .accessibilityLabel("Amount, \(AccessibilityMoney.currencyName(purchaseCurrencyCode))")
+                            .accessibilityFocused($accessibleField, equals: .amount)
                     }
                     
                     //disp currency picker
@@ -123,6 +142,7 @@ struct SimulatorView: View {
                             Text("\(currency.code) – \(currency.name)").tag(currency.code)
                         }
                     }
+                    .accessibilityHint("Changing currency clears the purchase amount.")
                 }
                 .foresightCard()
 
@@ -147,6 +167,9 @@ struct SimulatorView: View {
                     .padding()
                     .background(ForesightTheme.accentSoft)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Purchase amount")
+                    .accessibilityValue(AccessibilityMoney.spoken(previewAmount, currencyCode: purchaseCurrencyCode))
                 }
 
                 Button {
@@ -165,11 +188,13 @@ struct SimulatorView: View {
                     Button("Cancel Lookup", action: cancelLookup)
                 }
                 if let errorMessage {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button("Retry", action: calculateImpact)
+                    AccessibleErrorSummary(message: errorMessage, fieldName: failedField?.title, attempt: errorAttempt,
+                                           recover: failedField.map { field in
+                                               { focusedField = field == .goal ? nil : field; accessibleField = field }
+                                           })
+                    if failedField == nil {
+                        Button("Retry", action: calculateImpact)
+                    }
                 }
             }
             .foresightReadableContent()
@@ -308,7 +333,7 @@ struct SimulatorView: View {
         reconcileSelection(preferredID: prefill.preferredGoalID)
         if selectedGoalID != prefill.preferredGoalID {
             selectedGoalID = nil
-            errorMessage = "The original goal is no longer available. Choose a current goal before calculating."
+            showError("The original goal is no longer available. Choose a current goal before calculating.", field: .goal)
         }
         evaluation = nil
         isShowingResult = false
@@ -324,6 +349,12 @@ struct SimulatorView: View {
         isLoadingRate = false
     }
 
+    private func showError(_ message: String, field: Field? = nil) {
+        failedField = field
+        errorMessage = message
+        errorAttempt += 1
+    }
+
     private func calculateImpact() {
         focusedField = nil
         cancelLookup()
@@ -331,11 +362,11 @@ struct SimulatorView: View {
         // domain calculator.
         let cleanedName = FinancialFormValidation.cleanName(purchaseName)
         guard !cleanedName.isEmpty else {
-            errorMessage = "Purchase name is required."
+            showError("Purchase name is required.", field: .purchaseName)
             return
         }
         guard let goal = selectedGoal else {
-            errorMessage = "Choose a goal before calculating."
+            showError("Choose a goal before calculating.", field: .goal)
             return
         }
 
@@ -345,7 +376,7 @@ struct SimulatorView: View {
             originalMinor = try MoneyFormatting.parseMinorUnits(amount, currency: currency)
             guard originalMinor > 0 else { throw PurchaseImpactError.invalidPurchaseAmount }
         } catch {
-            errorMessage = error.localizedDescription
+            showError(error.localizedDescription, field: .amount)
             return
         }
 
@@ -412,7 +443,7 @@ struct SimulatorView: View {
             } catch is CancellationError {
                 // Superseded requests never replace the current draft or result.
             } catch {
-                if requestID == token { errorMessage = error.localizedDescription }
+                if requestID == token { showError(error.localizedDescription) }
             }
             if requestID == token {
                 isLoadingRate = false
