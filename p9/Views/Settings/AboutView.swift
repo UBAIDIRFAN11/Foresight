@@ -18,7 +18,7 @@ struct AboutView: View {
                     Text("Version \(versionText)")
                         .foregroundStyle(.secondary)
 
-                    Text("Plan Today. A brighter tomorrow")
+                    Text("Plan today. A brighter tomorrow")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(ForesightTheme.accent)
                         .fixedSize(horizontal: false, vertical: true)
@@ -40,8 +40,14 @@ struct AboutView: View {
                     Text("Foreign-currency evaluations use dated exchange-rate information provided by [Frankfurter](https://frankfurter.dev/).")
                         .foregroundStyle(.secondary)
                         .tint(ForesightTheme.accent)
+                    
+                    Text("Forecast simulations use a Swift Adaptation of Sebastiano Vigna's public-domain SplitMix64 generator.")
+                        .foregroundStyle(.secondary)
 
                     Text("The application icon was generated using the app icon generator on [appicon.co](https://appicon.co).")
+                        .foregroundStyle(.secondary)
+                    
+                    Text("Development was assisted by OpenAI's ChatGPT and Codex, and Anthropic's Claude Code.")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

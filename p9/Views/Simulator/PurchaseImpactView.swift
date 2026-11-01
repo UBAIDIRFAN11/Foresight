@@ -38,6 +38,9 @@ struct PurchaseImpactView: View {
     @AccessibilityFocusState private var forecastFocused: Bool
     @AccessibilityFocusState private var insightFocused: Bool
     @AccessibilityFocusState private var reminderFocused: Bool
+    // False once a live save has moved the user to History, so closing the reminder
+    // sheet does not send VoiceOver focus back into this now-hidden screen.
+    @State private var restoresReminderFocus = true
     @State private var sliderValue = 0.0
     @State private var visibleStartMonth = 0
     @State private var selectedChartDate: Date?
@@ -136,7 +139,7 @@ struct PurchaseImpactView: View {
             FinancialInsightsSheet(request: request, sourceIsCurrent: purchaseInsightIsCurrent(request),
                                    validateSource: { try validatePurchaseInsight(request) })
         }
-        .sheet(isPresented: $isShowingReminderSheet, onDismiss: { reminderFocused = true }) {
+        .sheet(isPresented: $isShowingReminderSheet, onDismiss: { if restoresReminderFocus { reminderFocused = true } }) {
             NavigationStack {
                 reminderSetupSheet
             }
@@ -374,6 +377,7 @@ struct PurchaseImpactView: View {
                 do {
                     try SavedDecisionStore.validateLive(evaluation, in: modelContext)
                     saveError = nil
+                    restoresReminderFocus = true
                     isShowingReminderSheet = true
                 } catch { saveError = error.localizedDescription; saveErrorAttempt += 1 }
             } label: {
@@ -414,6 +418,7 @@ struct PurchaseImpactView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 Button {
+                    restoresReminderFocus = true
                     isShowingReminderSheet = true
                 } label: {
                     Label(activeReminder == nil ? "Set Review Reminder" : "Reschedule Reminder", systemImage: "bell")
@@ -598,6 +603,7 @@ struct PurchaseImpactView: View {
                 _ = try ReminderStore.upsertPurchaseReminder(for: decision, deliveryDate: date, in: modelContext)
             }
             reminderError = nil
+            if case .live = mode, onSaved != nil { restoresReminderFocus = false }
             isShowingReminderSheet = false
             reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused, requestAuthorizationIfNeeded: true)
             if case .live = mode { onSaved?(decision) }

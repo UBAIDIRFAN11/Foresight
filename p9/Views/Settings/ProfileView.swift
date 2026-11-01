@@ -9,6 +9,9 @@ struct ProfileView: View {
 
     @Query private var goals: [FinancialGoal]
     @State private var errorMessage: String?
+    @State private var isChoosingFocusGoal = false
+    @AccessibilityFocusState private var focusChooserFocused: Bool
+    @EnvironmentObject private var router: AppRouter
 
     private var sortedGoals: [FinancialGoal] {
         goals.sorted(by: goalSort)
@@ -81,6 +84,28 @@ struct ProfileView: View {
         .background(ForesightTheme.background)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isChoosingFocusGoal, onDismiss: {
+            if !goals.isEmpty, router.selectedTab == .settings { focusChooserFocused = true }
+        }) {
+            NavigationStack {
+                GoalSelectionSheet(
+                    navigationTitle: "Preferred Focus Goal",
+                    profile: profile,
+                    evaluationDay: FinancialCalendar.localEvaluationDay(),
+                    selectedID: preferredGoalID,
+                    noneOption: GoalSelectionNoneOption(title: "Automatic", detail: "Home shows your highest-priority goal with the nearest deadline.")
+                ) { id in
+                    try savePreference(id)
+                }
+            }
+        }
+    }
+
+    // Goal names can repeat, so the chosen goal is shown with its deadline.
+    private var preferenceSummary: String {
+        guard let id = preferredGoalID, let goal = goals.first(where: { $0.id == id }) else { return "Automatic" }
+        let deadline = FinancialCalendar.displayDate(fromUTCNoon: goal.targetDate).formatted(.dateTime.day().month(.abbreviated).year())
+        return "\(goal.name) · due \(deadline)"
     }
 
     //Planning Overview
@@ -144,18 +169,24 @@ struct ProfileView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                Picker("Preferred focus goal", selection: preferenceBinding) {
-                    Text("Automatic").tag(nil as UUID?)
-
-                    ForEach(sortedGoals) { goal in
-                        Text(goal.name).tag(Optional(goal.id))
+                Button {
+                    isChoosingFocusGoal = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(preferenceSummary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.footnote.weight(.semibold))
+                            .accessibilityHidden(true)
                     }
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
                 .tint(ForesightTheme.accent)
                 .disabled(goals.isEmpty)
+                .accessibilityLabel("Preferred focus goal")
+                .accessibilityValue(preferenceSummary)
                 .accessibilityHint("Sets the default goal shown on Home.")
+                .accessibilityFocused($focusChooserFocused)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -165,26 +196,25 @@ struct ProfileView: View {
 
     //Persistence
 
-    private var preferenceBinding: Binding<UUID?> {
-        Binding(
-            get: {
-                profile.preferredFocusGoalID.flatMap { id in
-                    goals.contains { $0.id == id } ? id : nil
-                }
-            },
-            set: { id in
-                do {
-                    try FinancialProfilePolicy.saveFocusPreference(
-                        id,
-                        for: profile,
-                        in: modelContext
-                    )
-                    errorMessage = nil
-                } catch {
-                    errorMessage = "Could not save your preference. \(error.localizedDescription)"
-                    if let errorMessage { AccessibilityNotification.Announcement(errorMessage).post() }
-                }
-            }
-        )
+    private var preferredGoalID: UUID? {
+        // A preference for a deleted goal behaves as Automatic.
+        profile.preferredFocusGoalID.flatMap { id in
+            goals.contains { $0.id == id } ? id : nil
+        }
+    }
+
+    private func savePreference(_ id: UUID?) throws {
+        do {
+            // The policy rolls back the stored and in-memory preference if saving fails.
+            try FinancialProfilePolicy.saveFocusPreference(
+                id,
+                for: profile,
+                in: modelContext
+            )
+            errorMessage = nil
+        } catch {
+            errorMessage = "Could not save your preference. \(error.localizedDescription)"
+            throw error
+        }
     }
 }

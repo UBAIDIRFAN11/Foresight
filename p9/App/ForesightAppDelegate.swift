@@ -96,7 +96,8 @@ final class NotificationActionBridge {
         payload: ReminderNotificationPayload, now: Date = Date(), calendar: Calendar = .current,
         globallyPaused: Bool? = nil
     ) async {
-        guard payload.kind == .purchaseReview, let context, let coordinator else { return }
+        guard payload.kind == .purchaseReview, let context, let coordinator,
+              !coordinator.isSuspendedForErasure else { return }
         do {
             if try ReminderStore.snooze(sourceID: payload.sourceID, revision: payload.revision,
                                         in: context, now: now, calendar: calendar) {

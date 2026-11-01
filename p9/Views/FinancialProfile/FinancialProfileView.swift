@@ -23,6 +23,11 @@ struct FinancialProfileView: View {
     @State private var errorAttempt = 0
     @AccessibilityFocusState private var accessibleField: MoneyField?
     @State private var hasLoadedDraft = false
+    @State private var showsPrivacy = false
+    @AccessibilityFocusState private var privacyLinkFocused: Bool
+    // A currency change that would clear typed amounts waits here until confirmed.
+    @State private var pendingCurrencyChange: CurrencyChangeRequest?
+    @State private var currencyContextID = UUID()
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .title) private var iconWidth = 42
     @FocusState private var focusedField: MoneyField?
@@ -53,21 +58,16 @@ struct FinancialProfileView: View {
                     Text("Financial Profile")
                         .accessibilityAddTraits(.isHeader)
                         .font(.largeTitle.weight(.bold))
-                    Text("Tell us about your finances to calculate your savings capacity. Your data stays on this device.")
+                    Text("Tell us about your finances to calculate your savings capacity. Your financial records are stored locally; device backups are managed by iOS.")
                         .foregroundStyle(.secondary)
+                    Button("Privacy Policy") { showsPrivacy = true }
+                        .accessibilityFocused($privacyLinkFocused)
                 }
 
                 Menu {
                     Picker("Preferred Currency", selection: Binding(
                         get: { currencyCode },
-                        set: { newValue in
-                            guard currencyCode != newValue else { return }
-                            currencyCode = newValue
-                            // Clear only an explicit currency change, never a loaded profile.
-                            currentSavings = ""
-                            monthlyIncome = ""
-                            recurringExpenses = ""
-                        }
+                        set: { newValue in requestCurrencyChange(to: newValue) }
                     )) {
                         ForEach(CurrencyDefinition.supported) { currency in
                             Text("\(currency.name) (\(currency.code))").tag(currency.code)
@@ -142,7 +142,78 @@ struct FinancialProfileView: View {
                 }
             }
         }
+        .sheet(isPresented: $showsPrivacy, onDismiss: { privacyLinkFocused = true }) {
+            NavigationStack { PrivacyView() }
+        }
         .onAppear(perform: loadDraftIfNeeded)
+        .onChange(of: amountFields) { _, _ in currencyContextID = UUID() }
+        .onChange(of: currencyCode) { _, _ in currencyContextID = UUID() }
+        .onChange(of: isCurrencyLocked) { _, _ in currencyContextID = UUID() }
+        .onChange(of: editedProfile?.id) { _, _ in currencyContextID = UUID() }
+        .onChange(of: editedProfile?.preferredCurrencyCode) { _, _ in currencyContextID = UUID() }
+        .onChange(of: [editedProfile?.currentSavingsMinor, editedProfile?.monthlyIncomeMinor, editedProfile?.recurringExpensesMinor]) { _, _ in
+            currencyContextID = UUID()
+        }
+        .alert("Change currency and clear amounts?", isPresented: isConfirmingCurrencyChange, presenting: pendingCurrencyChange) { request in
+            Button("Change Currency & Clear Amounts", role: .destructive) { confirmCurrencyChange(request) }
+            Button("Keep Current Currency", role: .cancel) { pendingCurrencyChange = nil }
+        } message: { request in
+            Text(request.message(draftNote: draftNote))
+        }
+    }
+
+    private var editedProfile: FinancialProfile? {
+        if case .editing(let profile) = mode { return profile }
+        return nil
+    }
+
+    private var amountFields: [CurrencyAmountField] {
+        [CurrencyAmountField(title: MoneyField.currentSavings.title, text: currentSavings),
+         CurrencyAmountField(title: MoneyField.monthlyIncome.title, text: monthlyIncome),
+         CurrencyAmountField(title: MoneyField.recurringExpenses.title, text: recurringExpenses)]
+    }
+
+    private var draftNote: String {
+        switch mode {
+        case .onboarding: "Nothing is saved until you tap Save Profile."
+        case .editing: "Your saved profile does not change until you tap Save Changes."
+        }
+    }
+
+    private var isConfirmingCurrencyChange: Binding<Bool> {
+        Binding(get: { pendingCurrencyChange != nil }, set: { if !$0 { pendingCurrencyChange = nil } })
+    }
+
+    private func requestCurrencyChange(to newValue: String) {
+        switch CurrencyChangeDecision.evaluate(currentCurrencyCode: currencyCode, requestedCurrencyCode: newValue,
+                                               fields: amountFields, isLocked: isCurrencyLocked) {
+        case .ignore:
+            return
+        case .applyImmediately:
+            applyCurrencyChange(newValue)
+        case .confirm(let request):
+            // Nothing changes until the user confirms; the picker keeps showing the current currency.
+            focusedField = nil
+            var stagedRequest = request
+            stagedRequest.contextID = currencyContextID
+            pendingCurrencyChange = stagedRequest
+        }
+    }
+
+    private func confirmCurrencyChange(_ request: CurrencyChangeRequest) {
+        pendingCurrencyChange = nil
+        // Ignore a confirmation that no longer matches the screen it was asked about.
+        guard request.isStillValid(currentCurrencyCode: currencyCode, fields: amountFields, isLocked: isCurrencyLocked,
+                                   contextID: currencyContextID) else { return }
+        applyCurrencyChange(request.requestedCurrencyCode)
+    }
+
+    private func applyCurrencyChange(_ newValue: String) {
+        currencyCode = newValue
+        // Clear only an explicit currency change, never a loaded profile.
+        currentSavings = ""
+        monthlyIncome = ""
+        recurringExpenses = ""
     }
 
     private var navigationTitle: String {

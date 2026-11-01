@@ -7,6 +7,8 @@ struct HistoryView: View {
     // Newest saved decisions appear first in the history list.
     @Query(sort: [SortDescriptor(\SavedDecision.savedAt, order: .reverse)]) private var decisions: [SavedDecision]
     @EnvironmentObject private var router: AppRouter
+    var savedNotice: SavedDecisionNotice? = nil
+    var onDismissSavedNotice: () -> Void = {}
 
     var body: some View {
         ScrollView {
@@ -60,6 +62,13 @@ struct HistoryView: View {
                         router.prefillSimulator(prefill)
                     }
                 )
+                // The confirmation sits on the destination itself, so it is visible even when
+                // History had another record open before the save.
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if let savedNotice, savedNotice.evaluationID == id {
+                        SavedDecisionBanner(notice: savedNotice, onDismiss: onDismissSavedNotice)
+                    }
+                }
             } else {
                 ContentUnavailableView(
                     "Decision Unavailable",

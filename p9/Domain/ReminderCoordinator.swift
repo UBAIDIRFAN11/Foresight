@@ -35,6 +35,25 @@ final class ReminderCoordinator: ObservableObject {
         self.calendar = calendar
     }
 
+    private(set) var isSuspendedForErasure = false
+
+    /// Invalidate snapshots and drain a possibly in-flight add before cleanup.
+    /// Cancellation alone cannot guarantee that the system did not schedule it.
+    func suspendForErasure() async {
+        isSuspendedForErasure = true
+        generation += 1
+        latestRequest = nil
+        authorizationRequested = false
+        await worker?.value
+        scheduledRequestIDs = []
+        failedRequestIDs = []
+        schedulingError = nil
+    }
+
+    func resumeAfterErasure() {
+        isSuspendedForErasure = false
+    }
+
     func reconcile(
         in context: ModelContext,
         globallyPaused: Bool,
@@ -44,6 +63,7 @@ final class ReminderCoordinator: ObservableObject {
     }
 
     func reconcileAndWait(in context: ModelContext, globallyPaused: Bool, requestAuthorizationIfNeeded: Bool = false) async {
+        guard !isSuspendedForErasure else { return }
         await withCheckedContinuation { continuation in
             waiters.append(continuation)
             enqueue(context: context, paused: globallyPaused, authorize: requestAuthorizationIfNeeded)
@@ -51,6 +71,7 @@ final class ReminderCoordinator: ObservableObject {
     }
 
     private func enqueue(context: ModelContext, paused: Bool, authorize: Bool) {
+        guard !isSuspendedForErasure else { return }
         latestRequest = (context, paused)
         authorizationRequested = authorizationRequested || authorize
         generation += 1

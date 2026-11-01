@@ -33,6 +33,11 @@ struct SimulatorView: View {
     @State private var isShowingResult = false
     @State private var pendingPrefill: SimulatorPrefill?
     @State private var isConfirmingDraftReplacement = false
+    // A currency change that would clear the typed amount waits here until confirmed.
+    @State private var pendingCurrencyChange: CurrencyChangeRequest?
+    @State private var currencyContextID = UUID()
+    @State private var isChoosingGoal = false
+    @EnvironmentObject private var router: AppRouter
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
@@ -90,15 +95,7 @@ struct SimulatorView: View {
                     .frame(maxWidth: .infinity)
                 } else {
                     // Goal selection is kept stable even if goals are added or deleted.
-                    Picker("Goal", selection: $selectedGoalID) {
-                        Text("Choose a goal").tag(nil as UUID?)
-                        ForEach(sortedGoals) { goal in
-                            Text(goal.name).tag(Optional(goal.id))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityFocused($accessibleField, equals: .goal)
-                    .foresightCard()
+                    selectedGoalReview
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -130,13 +127,7 @@ struct SimulatorView: View {
                     //disp currency picker
                     Picker("Purchase currency", selection: Binding(
                         get: { purchaseCurrencyCode },
-                        set: { currency in
-                            cancelLookup()
-                            purchaseCurrencyCode = currency
-                            amount = ""
-                            evaluation = nil
-                            errorMessage = nil
-                        }
+                        set: { currency in requestCurrencyChange(to: currency) }
                     )) {
                         ForEach(CurrencyDefinition.supported) { currency in
                             Text("\(currency.code) – \(currency.name)").tag(currency.code)
@@ -189,9 +180,7 @@ struct SimulatorView: View {
                 }
                 if let errorMessage {
                     AccessibleErrorSummary(message: errorMessage, fieldName: failedField?.title, attempt: errorAttempt,
-                                           recover: failedField.map { field in
-                                               { focusedField = field == .goal ? nil : field; accessibleField = field }
-                                           })
+                                           recover: recoveryAction)
                     if failedField == nil {
                         Button("Retry", action: calculateImpact)
                     }
@@ -240,6 +229,8 @@ struct SimulatorView: View {
             reconcileSelection(preferredID: initialGoalID)
         }
         .onChange(of: evaluationDay) { _, _ in cancelLookup() }
+        .onChange(of: profile.id) { _, _ in cancelLookup() }
+        .onChange(of: [profile.currentSavingsMinor, profile.monthlyIncomeMinor, profile.recurringExpensesMinor]) { _, _ in cancelLookup() }
         .onChange(of: profile.preferredCurrencyCode) { _, _ in cancelLookup() }
         .onChange(of: financialDraftInputs) { _, _ in cancelLookup() }
         .onChange(of: selectedGoal?.name) { _, _ in cancelLookup() }
@@ -251,6 +242,11 @@ struct SimulatorView: View {
         }
         .onChange(of: prefill?.token) { _, _ in
             receivePrefillIfNeeded(prefill)
+        }
+        .onChange(of: pendingCurrencyChange) { _, request in
+            if request == nil, let pendingPrefill {
+                receivePrefillIfNeeded(pendingPrefill)
+            }
         }
         .confirmationDialog("Replace current simulator draft?", isPresented: $isConfirmingDraftReplacement, titleVisibility: .visible) {
             Button("Replace Draft") {
@@ -267,6 +263,137 @@ struct SimulatorView: View {
         } message: {
             Text("Re-evaluating a saved decision will replace the current unsaved simulator fields.")
         }
+        .sheet(isPresented: $isChoosingGoal, onDismiss: goalChooserDismissed) {
+            NavigationStack {
+                GoalSelectionSheet(
+                    navigationTitle: "Choose Goal",
+                    profile: profile,
+                    evaluationDay: evaluationDay,
+                    selectedID: selectedGoalID,
+                    noneOption: GoalSelectionNoneOption(title: "No goal selected", detail: "Choose a goal before calculating.")
+                ) { id in
+                    selectedGoalID = id
+                    // A chosen goal resolves a "choose a goal" error.
+                    if id != nil, failedField == .goal { errorMessage = nil; failedField = nil }
+                }
+            }
+        }
+        .alert("Change currency and clear amounts?", isPresented: isConfirmingCurrencyChange, presenting: pendingCurrencyChange) { request in
+            Button("Change Currency & Clear Amounts", role: .destructive) { confirmCurrencyChange(request) }
+            Button("Keep Current Currency", role: .cancel) { pendingCurrencyChange = nil }
+        } message: { request in
+            Text(request.message(draftNote: "Any calculated result for this draft is also cleared."))
+        }
+    }
+
+    /// The selected goal, shown with the same card as Home so the right goal is visible
+    /// before calculating, even when several goals share a name.
+    private var selectedGoalReview: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Goal")
+                .accessibilityAddTraits(.isHeader)
+                .font(.headline)
+            if let goal = selectedGoal {
+                GoalCard(goal: goal, profile: profile, today: evaluationDay, showsNavigationIndicator: false, showsCurrencyCode: true)
+                // The purchase currency is chosen separately in Purchase Details.
+                Text("Goal amounts are in \(CurrencyDefinition.definition(for: profile.preferredCurrencyCode).displayName).")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No goal selected. Choose the goal this purchase should be measured against.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foresightCard()
+            }
+            Button {
+                openGoalChooser()
+            } label: {
+                Label(selectedGoal == nil ? "Choose Goal" : "Change Goal", systemImage: "flag")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .accessibilityHint("Shows each goal's target and deadline.")
+            .accessibilityFocused($accessibleField, equals: .goal)
+        }
+    }
+
+    private var recoveryAction: (() -> Void)? {
+        guard let field = failedField else { return nil }
+        guard field == .goal else {
+            return { focusedField = field; accessibleField = field }
+        }
+        // "Edit Goal" opens the chooser; with no goals left there is nothing to choose.
+        guard !sortedGoals.isEmpty else { return nil }
+        return { openGoalChooser() }
+    }
+
+    private func openGoalChooser() {
+        guard pendingCurrencyChange == nil, !isConfirmingDraftReplacement, pendingPrefill == nil else { return }
+        // Stop a running lookup so it cannot open a result while the chooser is up; the draft is kept.
+        focusedField = nil
+        cancelLookup()
+        isChoosingGoal = true
+    }
+
+    private func goalChooserDismissed() {
+        if let pendingPrefill {
+            receivePrefillIfNeeded(pendingPrefill)
+            return
+        }
+        // Return VoiceOver to the opener only while it still exists on the visible Simulator form.
+        if pendingPrefill == nil, !sortedGoals.isEmpty, !isShowingResult, router.selectedTab == .simulator {
+            accessibleField = .goal
+        }
+    }
+
+    private var amountFields: [CurrencyAmountField] {
+        [CurrencyAmountField(title: "the purchase amount", text: amount)]
+    }
+
+    private var isConfirmingCurrencyChange: Binding<Bool> {
+        Binding(
+            get: { pendingCurrencyChange != nil },
+            set: { if !$0 { pendingCurrencyChange = nil } }
+        )
+    }
+
+    private func requestCurrencyChange(to currency: String) {
+        guard currency != purchaseCurrencyCode, !isChoosingGoal, !isConfirmingDraftReplacement,
+              pendingPrefill == nil, pendingCurrencyChange == nil else { return }
+        switch CurrencyChangeDecision.evaluate(currentCurrencyCode: purchaseCurrencyCode, requestedCurrencyCode: currency,
+                                               fields: amountFields, isLocked: false) {
+        case .ignore:
+            return
+        case .applyImmediately:
+            applyCurrencyChange(currency)
+        case .confirm(let request):
+            // Stop any lookup first so a finishing request cannot open a result behind the alert.
+            // Keeping the currency leaves the lookup stopped; the user can calculate again.
+            focusedField = nil
+            cancelLookup()
+            var stagedRequest = request
+            stagedRequest.contextID = currencyContextID
+            pendingCurrencyChange = stagedRequest
+        }
+    }
+
+    private func confirmCurrencyChange(_ request: CurrencyChangeRequest) {
+        pendingCurrencyChange = nil
+        // Ignore a confirmation whose draft changed after it was asked for.
+        guard pendingPrefill == nil,
+              request.isStillValid(currentCurrencyCode: purchaseCurrencyCode, fields: amountFields, isLocked: false,
+                                   contextID: currencyContextID) else { return }
+        applyCurrencyChange(request.requestedCurrencyCode)
+    }
+
+    private func applyCurrencyChange(_ currency: String) {
+        cancelLookup()
+        purchaseCurrencyCode = currency
+        amount = ""
+        evaluation = nil
+        errorMessage = nil
     }
 
     private var sortedGoals: [FinancialGoal] {
@@ -304,6 +431,11 @@ struct SimulatorView: View {
 
     private func receivePrefillIfNeeded(_ prefill: SimulatorPrefill?) {
         guard let prefill else { return }
+        // A new prefill supersedes any currency intent, but waits for the current
+        // chooser/alert to close before entering the existing Replace Draft flow.
+        cancelLookup()
+        pendingPrefill = prefill
+        guard !isChoosingGoal, pendingCurrencyChange == nil else { return }
         if hasUnsavedDraft {
             pendingPrefill = prefill
             if isShowingResult {
@@ -325,6 +457,8 @@ struct SimulatorView: View {
     }
 
     private func applyPrefill(_ prefill: SimulatorPrefill) {
+        // Prefill restores currency and amount together, so it bypasses the currency confirmation.
+        pendingCurrencyChange = nil
         purchaseName = prefill.purchaseName
         cancelLookup()
         purchaseCurrencyCode = prefill.currencyCode
@@ -333,7 +467,9 @@ struct SimulatorView: View {
         reconcileSelection(preferredID: prefill.preferredGoalID)
         if selectedGoalID != prefill.preferredGoalID {
             selectedGoalID = nil
-            showError("The original goal is no longer available. Choose a current goal before calculating.", field: .goal)
+            showError(sortedGoals.isEmpty
+                      ? "The original goal is no longer available. Add a goal in the Goals tab before calculating."
+                      : "The original goal is no longer available. Choose a current goal before calculating.", field: .goal)
         }
         evaluation = nil
         isShowingResult = false
@@ -343,6 +479,9 @@ struct SimulatorView: View {
 
 
     private func cancelLookup() {
+        // Any input/context change invalidates an earlier currency confirmation,
+        // even if the user subsequently restores the same amount and currency.
+        currencyContextID = UUID()
         lookupTask?.cancel()
         lookupTask = nil
         requestID = nil

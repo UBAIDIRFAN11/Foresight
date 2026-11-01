@@ -11,6 +11,8 @@ struct HomeView: View {
     @Query(sort: [SortDescriptor(\SavedDecision.savedAt, order: .reverse)]) private var savedDecisions: [SavedDecision]
     @EnvironmentObject private var router: AppRouter
     @State private var focus = HomeFocusSelection()
+    @State private var isChoosingFocusGoal = false
+    @AccessibilityFocusState private var focusChooserFocused: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var today: Date { evaluationDay }
@@ -33,12 +35,15 @@ struct HomeView: View {
                         .accessibilityAddTraits(.isHeader)
                         .font(.headline)
                     if sortedGoals.count > 1 {
-                        Picker("Focus Goal", selection: $focus.selectedID) {
-                            ForEach(sortedGoals) { goal in
-                                Text(goal.name).tag(Optional(goal.id))
-                            }
+                        Button {
+                            isChoosingFocusGoal = true
+                        } label: {
+                            Label("Change Focus Goal", systemImage: "arrow.left.arrow.right")
                         }
-                        .pickerStyle(.menu)
+                        .buttonStyle(.bordered)
+                        .accessibilityValue(focusedGoal?.name ?? "")
+                        .accessibilityHint("Shows each goal's target and deadline.")
+                        .accessibilityFocused($focusChooserFocused)
                     }
                     if let focusedGoal {
                         NavigationLink(value: focusedGoal.id) {
@@ -106,6 +111,18 @@ struct HomeView: View {
         .background(ForesightTheme.background)
         .navigationDestination(for: UUID.self) { id in
             GoalDetailView(goalID: id, profile: profile, evaluationDay: evaluationDay)
+        }
+        .sheet(isPresented: $isChoosingFocusGoal, onDismiss: {
+            // Only restore focus if the opener still exists on the visible Home screen.
+            if sortedGoals.count > 1, router.selectedTab == .home { focusChooserFocused = true }
+        }) {
+            NavigationStack {
+                // Home always shows a goal when one exists, so there is no "none" choice here.
+                GoalSelectionSheet(navigationTitle: "Focus Goal", profile: profile, evaluationDay: evaluationDay,
+                                   selectedID: focus.selectedID) { id in
+                    focus.selectedID = id
+                }
+            }
         }
         .onChange(of: sortedGoals.map(\.id), initial: true) { _, ids in
             focus.reconcile(sortedIDs: ids, preferredID: profile.preferredFocusGoalID)

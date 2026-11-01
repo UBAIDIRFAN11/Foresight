@@ -4,7 +4,7 @@ struct SettingsView: View {
     @Bindable var profile: FinancialProfile
 
     var body: some View {
-        // Settings links to profile editing plus placeholder/info screens.
+        // Settings links to profile, reminders, privacy controls and app information.
         List {
             Section {
                 NavigationLink {
@@ -17,6 +17,12 @@ struct SettingsView: View {
                     RemindersSettingsView()
                 } label: {
                     Label("Reminders", systemImage: "bell")
+                }
+
+                NavigationLink {
+                    PrivacyView(allowsErasure: true)
+                } label: {
+                    Label("Privacy & Data", systemImage: "hand.raised")
                 }
 
                 NavigationLink {

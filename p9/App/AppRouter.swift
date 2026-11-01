@@ -11,6 +11,13 @@ final class AppRouter: ObservableObject {
     @Published var simulatorPrefill: SimulatorPrefill?
 
 
+    func resetAfterErasure() {
+        selectedTab = .home
+        goalPath = []
+        historyPath = []
+        simulatorPrefill = nil
+    }
+
     func openSavedDecision(id: UUID, revision: UUID? = nil) {
         selectedTab = .history
         historyPath = [id]
@@ -57,10 +64,15 @@ enum NotificationRouteBridge {
             }
         }
     }
+    @MainActor static var isSuspendedForErasure = false
+
+    @MainActor static func clearPendingRoute() { pendingRoute = nil }
+
     @MainActor private static var pendingRoute: (kind: ReminderKind, sourceID: UUID, revision: UUID?)?
 
     @MainActor
     static func route(kind: ReminderKind, sourceID: UUID, revision: UUID?) {
+        guard !isSuspendedForErasure else { return }
         guard router != nil else {
             pendingRoute = (kind, sourceID, revision)
             return

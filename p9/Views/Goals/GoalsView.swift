@@ -13,7 +13,8 @@ struct GoalsView: View {
     @Query private var goals: [FinancialGoal]
     @State private var filter: GoalFilter = .all
     @State private var isAddingGoal = false
-    @AccessibilityFocusState private var addGoalFocused: Bool
+    @State private var addGoalLauncher: AddGoalLauncher = .toolbar
+    @AccessibilityFocusState private var focusedLauncher: AddGoalLauncher?
     @Namespace private var goalsRotor
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let evaluationDay: Date
@@ -49,8 +50,8 @@ struct GoalsView: View {
                         .pickerStyle(.segmented)
                     }
 
-                    if displayedGoals.isEmpty {
-                        ContentUnavailableView("No Goals", systemImage: "flag", description: Text("Add a goal to start planning against your monthly capacity."))
+                    if let emptyState = GoalsEmptyState(totalGoalCount: goals.count, filter: filter, matchingCount: displayedGoals.count) {
+                        emptyStateView(emptyState)
                     } else {
                         LazyVStack(spacing: 14) {
                             ForEach(displayedGoals) { goal in
@@ -80,21 +81,61 @@ struct GoalsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    isAddingGoal = true
+                    addGoal(from: .toolbar)
                 } label: {
                     Image(systemName: "plus")
                 }
                 .accessibilityLabel("Add Goal")
-                .accessibilityFocused($addGoalFocused)
+                .accessibilityFocused($focusedLauncher, equals: .toolbar)
             }
         }
-        .sheet(isPresented: $isAddingGoal, onDismiss: { addGoalFocused = true }) {
+        .sheet(isPresented: $isAddingGoal, onDismiss: restoreAddGoalFocus) {
             NavigationStack {
                 GoalEditorView(profile: profile, goal: nil, evaluationDay: evaluationDay)
             }
         }
         .navigationDestination(for: UUID.self) { id in
             GoalDetailView(goalID: id, profile: profile, evaluationDay: evaluationDay)
+        }
+    }
+
+    @ViewBuilder
+    private func emptyStateView(_ state: GoalsEmptyState) -> some View {
+        switch state {
+        case .noGoals:
+            ContentUnavailableView {
+                Label("No Goals Yet", systemImage: "flag")
+            } description: {
+                Text("Add your first savings goal to see whether your monthly capacity can reach it on time.")
+            } actions: {
+                Button("Add Goal") { addGoal(from: .emptyState) }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityFocused($focusedLauncher, equals: .emptyState)
+            }
+        case .noMatches(let emptyFilter):
+            ContentUnavailableView {
+                Label("No Goals \(emptyFilter.rawValue)", systemImage: "line.3.horizontal.decrease.circle")
+            } description: {
+                Text("None of your \(goals.count) \(goals.count == 1 ? "goal is" : "goals are") \(emptyFilter.rawValue.lowercased()) right now. Show all goals to see them.")
+            } actions: {
+                // Only the filter changes; goals, statuses and sorting are untouched.
+                Button("Show All Goals") { filter = .all }
+                    .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private func addGoal(from launcher: AddGoalLauncher) {
+        addGoalLauncher = launcher
+        isAddingGoal = true
+    }
+
+    private func restoreAddGoalFocus() {
+        // The empty-state button disappears once a goal exists, so fall back to the toolbar button.
+        if addGoalLauncher == .emptyState, goals.isEmpty {
+            focusedLauncher = .emptyState
+        } else {
+            focusedLauncher = .toolbar
         }
     }
 
@@ -151,6 +192,27 @@ struct GoalsView: View {
             return true
         default:
             return false
+        }
+    }
+}
+
+private enum AddGoalLauncher: Hashable {
+    case toolbar
+    case emptyState
+}
+
+/// Distinguishes "no goals exist" from "the selected filter has no matches" so the
+/// Goals screen can explain the situation and offer the right recovery action.
+enum GoalsEmptyState: Equatable {
+    case noGoals
+    case noMatches(GoalsView.GoalFilter)
+
+    init?(totalGoalCount: Int, filter: GoalsView.GoalFilter, matchingCount: Int) {
+        guard matchingCount == 0 else { return nil }
+        if totalGoalCount == 0 || filter == .all {
+            self = .noGoals
+        } else {
+            self = .noMatches(filter)
         }
     }
 }

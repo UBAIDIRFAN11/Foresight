@@ -5,12 +5,14 @@ struct GoalCard: View {
     let profile: FinancialProfile
     let today: Date
     let showsNavigationIndicator: Bool
+    let showsCurrencyCode: Bool
 
-    init(goal: FinancialGoal, profile: FinancialProfile, today: Date, showsNavigationIndicator: Bool = true) {
+    init(goal: FinancialGoal, profile: FinancialProfile, today: Date, showsNavigationIndicator: Bool = true, showsCurrencyCode: Bool = false) {
         self.goal = goal
         self.profile = profile
         self.today = today
         self.showsNavigationIndicator = showsNavigationIndicator
+        self.showsCurrencyCode = showsCurrencyCode
     }
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -70,7 +72,7 @@ struct GoalCard: View {
                     }
                     ProgressView(value: result.progress)
                         .tint(ForesightTheme.accent)
-                    Text("\(MoneyFormatting.display(profile.currentSavingsMinor, currencyCode: profile.preferredCurrencyCode)) of \(MoneyFormatting.display(goal.targetAmountMinor, currencyCode: profile.preferredCurrencyCode))")
+                    Text("\(MoneyFormatting.display(profile.currentSavingsMinor, currencyCode: profile.preferredCurrencyCode)) of \(MoneyFormatting.display(goal.targetAmountMinor, currencyCode: profile.preferredCurrencyCode))\(showsCurrencyCode ? " \(profile.preferredCurrencyCode)" : "")")
                         .font(.subheadline.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
                 }

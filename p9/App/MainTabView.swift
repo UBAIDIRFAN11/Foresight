@@ -19,6 +19,8 @@ struct MainTabView: View {
     // When Home opens the simulator, this carries the focused goal across tabs.
     @State private var simulatorGoalID: UUID?
     @State private var simulatorGoalRequestID: UUID?
+    // Confirmation for the most recent successful save; cleared when History moves away from it.
+    @State private var savedNotice: SavedDecisionNotice?
 
     var body: some View {
         TabView(selection: $router.selectedTab) {
@@ -58,9 +60,13 @@ struct MainTabView: View {
                     onPrefillConsumed: { token in
                         router.consumeSimulatorPrefill(token: token)
                     }
-                ) { _ in
-                    //successful save should take the user to their saved history.
-                    router.selectedTab = .history
+                ) { decision in
+                    // Open the record that was just saved, replacing any older History detail,
+                    // and confirm the save on that screen.
+                    router.openSavedDecision(id: decision.evaluationID)
+                    let notice = SavedDecisionNotice(decision: decision)
+                    savedNotice = notice
+                    AccessibilityNotification.Announcement(notice.message).post()
                 }
             }
             .tabItem {
@@ -69,7 +75,7 @@ struct MainTabView: View {
             .tag(AppTab.simulator)
 
             NavigationStack(path: $router.historyPath) {
-                HistoryView()
+                HistoryView(savedNotice: visibleSavedNotice, onDismissSavedNotice: { savedNotice = nil })
             }
             .tabItem {
                 Label("History", systemImage: "folder")
@@ -85,5 +91,19 @@ struct MainTabView: View {
             .tag(AppTab.settings)
         }
         .tint(ForesightTheme.accent)
+        .onChange(of: router.selectedTab) { _, _ in clearSavedNoticeIfNotApplicable() }
+        .onChange(of: router.historyPath) { _, _ in clearSavedNoticeIfNotApplicable() }
+    }
+
+    private var visibleSavedNotice: SavedDecisionNotice? {
+        guard let savedNotice, savedNotice.applies(selectedTab: router.selectedTab, historyPath: router.historyPath) else { return nil }
+        return savedNotice
+    }
+
+    private func clearSavedNoticeIfNotApplicable() {
+        // Leaving History or navigating away from the saved record ends the confirmation.
+        if let savedNotice, !savedNotice.applies(selectedTab: router.selectedTab, historyPath: router.historyPath) {
+            self.savedNotice = nil
+        }
     }
 }

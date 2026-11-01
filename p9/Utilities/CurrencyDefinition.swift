@@ -18,6 +18,9 @@ nonisolated struct CurrencyDefinition: Identifiable, Hashable, Sendable {
 
     var id: String { code }
 
+    //e.g. "Australian Dollar (AUD)"
+    var displayName: String { "\(name) (\(code))" }
+
     //simulator uses this arr to populate currency picker
     static let supported: [CurrencyDefinition] = [
         .init(code: "AUD", name: "Australian Dollar", minorUnitScale: 2, localeIdentifier: "en_AU"),
