@@ -3,10 +3,9 @@
 //  p9
 //
 //  Created by Ubaid on 29/9/2026.
-//
 
-// Loads the local financial profile and triggers reminder reconciliation when
-// the app becomes active or system time-zone state changes.
+//decides whether to load the main app, show onboarding, or a loading/error state
+
 import SwiftUI
 import SwiftData
 
@@ -19,8 +18,6 @@ struct ContentView: View {
     @State private var loadState: LoadState = .loading
 
     var body: some View {
-        //ContentView decides whether the app should show onboarding,
-        // the main tabs, or a loading/error state.
         Group {
             
             //if data is loading, show loading state
@@ -86,6 +83,8 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in refreshDay() }
     }
 
+    
+    // retrieves financial profiles from SwiftData
     private func loadProfile() {
         do {
             let profiles = try FinancialProfilePolicy.fetchProfiles(in: modelContext)
@@ -102,6 +101,7 @@ struct ContentView: View {
         }
     }
 
+    //updates the current evaluation date and reconciles reminders.
     private func refreshDay() {
         evaluationDay = FinancialCalendar.localEvaluationDay()
         reminderCoordinator.reconcile(in: modelContext, globallyPaused: remindersPaused)

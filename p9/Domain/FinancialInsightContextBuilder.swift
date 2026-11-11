@@ -1,5 +1,7 @@
 import Foundation
 
+//this file is used to convert verified financial results into information the AI can understand.
+
 // Adapts three existing, already-calculated results into explanation requests.
 // None of these adapters calls FinancialCalculator, PurchaseImpactCalculator, ForecastEngine
 // or an exchange-rate service. They copy, validate and format existing values, and state
@@ -7,7 +9,7 @@ import Foundation
 // the required contribution), so the model never has to calculate.
 enum FinancialInsightContextBuilder {
 
-    //Snapshots
+    //create the snapshots
 
     static func goalSnapshot(source: ForecastContext, result: FinancialCalculationResult) throws -> GoalInsightSnapshot {
         // Invalid and overflow results have no meaningful explanation.
@@ -71,8 +73,9 @@ enum FinancialInsightContextBuilder {
         percentiles.lower <= percentiles.median && percentiles.median <= percentiles.upper
     }
 
-    //Requests
+    //create the AI explanation requests
 
+    //create a validated snapshot, and convert it to an AI explanation request
     static func goalRequest(source: ForecastContext, result: FinancialCalculationResult) throws -> FinancialInsightRequest {
         request(for: .goal(try goalSnapshot(source: source, result: result)))
     }
@@ -85,6 +88,8 @@ enum FinancialInsightContextBuilder {
         request(for: .forecast(try forecastSnapshot(result: result)))
     }
 
+    
+    //to check which type of result is being explained and call the appropriate builder
     static func request(for context: FinancialInsightContext) -> FinancialInsightRequest {
         switch context {
         case .goal(let snapshot): goalRequest(snapshot, context: context)
@@ -105,6 +110,8 @@ enum FinancialInsightContextBuilder {
             ? "Not needed: savings already meet the target"
             : !hasDeposits ? "Not applicable: no monthly deposit before the deadline" : money(result.monthlyRequiredMinor)
 
+        //prepare facts to provide AI with a verified financial figure to use.
+        //The vals come from app's existing calculations, not the AI.
         let facts = [
             FinancialInsightFact(id: "target", label: "Goal target", value: money(inputs.targetMinor)),
             FinancialInsightFact(id: "savings", label: "Current savings", value: money(inputs.savingsMinor)),
@@ -117,6 +124,10 @@ enum FinancialInsightContextBuilder {
             FinancialInsightFact(id: "completion", label: "Projected completion", value: completionText(result.completionProjection))
         ]
 
+        //prepare relationships between figures:
+        //We are providing the AI with pre-calculated interpretation of the figures, since otherwise
+        //it could possibly make mathematical errors if asked to compare numbers itself.
+        
         var relationships: [String] = []
         // Savings against the target today, when it is the comparison the explanation turns on:
         // already funded, or no deposit can count before the deadline. The model otherwise
@@ -178,15 +189,18 @@ enum FinancialInsightContextBuilder {
                 "This goal uses all of your profile savings and monthly capacity on its own; savings are not split between goals.",
                 "Projections assume income and expenses stay as entered."
             ],
+            
+            //focus decides what the main explaantion should discuss
             focus: goalFocus(result),
+            
+            //key consideration focus
             considerationFocus: goalConsiderationFocus(snapshot),
             suggestions: goalSuggestions(snapshot),
             uncertaintyNote: "Projections assume your income and expenses stay as entered, and each goal uses your full savings independently."
         )
     }
 
-    // Asking for a capacity-versus-required comparison when nothing is required led the model
-    // to pair unrelated figures, so the summary focus follows the scenario.
+
     private static func goalFocus(_ result: FinancialCalculationResult) -> String {
         switch result.status {
         case .pastDeadline, .noContributionBeforeDeadline:
@@ -194,7 +208,6 @@ enum FinancialInsightContextBuilder {
         default:
             break
         }
-        // An open question about zero capacity drew advice to change income or expenses.
         if result.monthlyCapacityMinor == 0 {
             return "Explain why your savings stay at their current level when income only matches expenses, and how far that leaves the balance from the target on the deadline."
         }

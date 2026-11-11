@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 
+//handles creating and editing savings goals
+
 struct GoalEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -19,6 +21,7 @@ struct GoalEditorView: View {
     @State private var errorAttempt = 0
     @AccessibilityFocusState private var accessibleField: Field?
     @State private var loaded = false
+    
     // Values present once the editor finished loading; used to detect unsaved changes.
     @State private var initialDraft: GoalEditorDraft?
     @State private var isConfirmingDiscard = false

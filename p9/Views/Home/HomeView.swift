@@ -1,14 +1,22 @@
 import SwiftUI
 import SwiftData
 
+//displays user's financial overview, focused goal, recent purchase decisions
+
 struct HomeView: View {
     @Bindable var profile: FinancialProfile
     let duplicateProfileCount: Int
     let evaluationDay: Date
+    
     // Home does not own Simulator navigation; it asks MainTabView to switch tabs.
     let onEvaluatePurchase: (UUID?) -> Void
+    
+    //retrieves goal and decision entries from SwiftData db
     @Query(sort: [SortDescriptor(\FinancialGoal.targetDate), SortDescriptor(\FinancialGoal.createdAt)]) private var goals: [FinancialGoal]
+    
+    //decisions sorted newest first
     @Query(sort: [SortDescriptor(\SavedDecision.savedAt, order: .reverse)]) private var savedDecisions: [SavedDecision]
+    
     @EnvironmentObject private var router: AppRouter
     @State private var focus = HomeFocusSelection()
     @State private var isChoosingFocusGoal = false
@@ -124,9 +132,12 @@ struct HomeView: View {
                 }
             }
         }
+        //keep focused goal on Home synced with user's saved goals
+        //runs when view initially appears, and when the goals arr changes
         .onChange(of: sortedGoals.map(\.id), initial: true) { _, ids in
             focus.reconcile(sortedIDs: ids, preferredID: profile.preferredFocusGoalID)
         }
+        //when preferred goal changes, update Home's focused foal to match
         .onChange(of: profile.preferredFocusGoalID) { _, preferredID in
             focus.applyDefault(sortedIDs: sortedGoals.map(\.id), preferredID: preferredID)
         }
@@ -143,6 +154,7 @@ struct HomeView: View {
     }
 
     private var capacityCard: some View {
+        //calculate how much user can save per month from their income - expenses
         let capacity = profile.monthlyIncomeMinor - profile.recurringExpensesMinor
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
@@ -156,9 +168,15 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Monthly Savings Capacity")
                     .font(.headline)
+                
+                //tries child views in order and disp 1st one that fits horizontally
                 ViewThatFits(in: .horizontal) {
+                    
+                    //all in 1 line
                     Text("\(MoneyFormatting.display(capacity, currencyCode: profile.preferredCurrencyCode))/month")
                         .font(.title.weight(.bold))
+                    
+                    //2 lines
                     VStack(alignment: .leading, spacing: 2) {
                         Text(MoneyFormatting.display(capacity, currencyCode: profile.preferredCurrencyCode))
                             .font(.title.weight(.bold))

@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 
+//provides the form for creating/editing a FinancialProfile
+
 struct FinancialProfileView: View {
     enum Mode {
         case onboarding
@@ -14,10 +16,12 @@ struct FinancialProfileView: View {
     let mode: Mode
     let onProfileSaved: ((FinancialProfile) -> Void)?
 
+    //vars to temp store what user enters into the form
     @State private var currentSavings = ""
     @State private var monthlyIncome = ""
     @State private var recurringExpenses = ""
     @State private var currencyCode = "AUD"
+    
     @State private var errorMessage: String?
     @State private var failedField: MoneyField?
     @State private var errorAttempt = 0
@@ -25,6 +29,7 @@ struct FinancialProfileView: View {
     @State private var hasLoadedDraft = false
     @State private var showsPrivacy = false
     @AccessibilityFocusState private var privacyLinkFocused: Bool
+    
     // A currency change that would clear typed amounts waits here until confirmed.
     @State private var pendingCurrencyChange: CurrencyChangeRequest?
     @State private var currencyContextID = UUID()
@@ -321,6 +326,7 @@ struct FinancialProfileView: View {
         }
     }
 
+    //When editing, loads existing financial values into the text fields using MoneyFormatting.editableText()
     private func loadDraftIfNeeded() {
         // Editing loads existing profile values once; onboarding starts empty.
         guard !hasLoadedDraft else { return }
@@ -349,6 +355,8 @@ struct FinancialProfileView: View {
                 return
             }
             failedField = .currentSavings
+            
+            //parses the 3 monetary inputs
             let savings = try MoneyFormatting.parseMinorUnits(currentSavings, currency: selectedCurrency)
             failedField = .monthlyIncome
             let income = try MoneyFormatting.parseMinorUnits(monthlyIncome, currency: selectedCurrency)
@@ -366,8 +374,12 @@ struct FinancialProfileView: View {
                     recurringExpensesMinor: expenses,
                     preferredCurrencyCode: currencyCode
                 )
+                
+                //save the newly created FinancialProfile through FinancialProfilePolicy
                 let saved = try FinancialProfilePolicy.createProfileIfStillMissing(profile, in: modelContext)
                 onProfileSaved?(saved)
+                
+            //if editing, just update existing FinancialProfile and call modelContext.save
             case .editing(let profile):
                 // Editing updates the selected profile in place.
                 profile.currentSavingsMinor = savings

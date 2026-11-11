@@ -1,5 +1,8 @@
 import SwiftUI
 
+//reusable component representing a goal card.
+//it displays goal name, priority, target amount, progress, deadline, and status
+
 struct GoalCard: View {
     let goal: FinancialGoal
     let profile: FinancialProfile

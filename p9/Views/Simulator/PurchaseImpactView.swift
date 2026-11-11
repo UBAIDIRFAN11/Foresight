@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 
+//view to display the impact of a hypothetical purchase on a goal.
+
 struct PurchaseImpactView: View {
     // Live results can be saved or adjusted. Saved results are read-only snapshots.
     enum Mode: Equatable {

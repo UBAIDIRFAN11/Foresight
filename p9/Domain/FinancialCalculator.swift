@@ -1,6 +1,7 @@
 import Foundation
 
-//calculates whether a goal is on-track.
+//The main deterministic calculation engine.
+//It determines whether a user can achieve a savings goal by its deadline.
 
 nonisolated enum FinancialCalculator {
     static let completionMonthLimit = 1_200
@@ -69,7 +70,7 @@ nonisolated enum FinancialCalculator {
             )
         }
 
-        //determine state: e.g. if goal is ontrack, at risk,
+        //determine state: e.g. if goal is ontrack, at risk
         let status: GoalFundingStatus
         if remaining == 0 {
             status = deadlineBalance >= inputs.targetMinor

@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 
+//disp all saved goals and enables users to filter or add more
+
 struct GoalsView: View {
     enum GoalFilter: String, CaseIterable, Identifiable {
         case all = "All"

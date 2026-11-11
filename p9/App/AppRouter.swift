@@ -10,7 +10,7 @@ final class AppRouter: ObservableObject {
     @Published var historyPath: [UUID] = []
     @Published var simulatorPrefill: SimulatorPrefill?
 
-
+    //After user erases their data, this resets navigation to Home and clears previous navigation paths and Simulator prefill information.
     func resetAfterErasure() {
         selectedTab = .home
         goalPath = []
@@ -18,21 +18,25 @@ final class AppRouter: ObservableObject {
         simulatorPrefill = nil
     }
 
+    //switches to History and sets the navigation path to the specified history.
     func openSavedDecision(id: UUID, revision: UUID? = nil) {
         selectedTab = .history
         historyPath = [id]
     }
 
+    //switches to Goals and sets the navigation path to the specified goal.
     func openGoal(id: UUID, revision: UUID? = nil) {
         selectedTab = .goals
         goalPath = [id]
     }
 
+    //opens simulator and supplies purchase info from an existing saved decision.
     func prefillSimulator(_ prefill: SimulatorPrefill) {
         selectedTab = .simulator
         simulatorPrefill = prefill
     }
 
+    //clears prefill after simulator has used it, to prevent repeated application.
     func consumeSimulatorPrefill(token: UUID) {
         guard simulatorPrefill?.token == token else { return }
         simulatorPrefill = nil
@@ -55,6 +59,7 @@ struct SimulatorPrefill: Equatable {
     }
 }
 
+//handles navigation requests originating from notifications
 enum NotificationRouteBridge {
     @MainActor static weak var router: AppRouter? {
         didSet {

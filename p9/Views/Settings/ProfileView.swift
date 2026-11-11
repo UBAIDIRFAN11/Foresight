@@ -2,6 +2,8 @@
 import SwiftUI
 import SwiftData
 
+//disp the profile management screen under Settings
+
 struct ProfileView: View {
     @Bindable var profile: FinancialProfile
     @Environment(\.modelContext) private var modelContext
@@ -203,6 +205,7 @@ struct ProfileView: View {
         }
     }
 
+    //uses FinancialProfilePolicy.saveFocusPreference to save user's preferred focus goal.
     private func savePreference(_ id: UUID?) throws {
         do {
             // The policy rolls back the stored and in-memory preference if saving fails.

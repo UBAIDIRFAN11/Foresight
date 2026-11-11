@@ -1,12 +1,20 @@
 import Foundation
 
-// Swift adaptation of Sebastiano Vigna's public-domain SplitMix64:
-// https://prng.di.unimi.it/splitmix64.c
-// Wrapping is intentional only inside this pseudorandom generator, never for money.
+//This engine is used to perform the Monte Carlo simulations.
+//It runs 5,000 different possible savings scenarios, allowing monthly income and expenses to vary randomly.
+//It then analyses the results to estimate how likely the user is to achieve their savings goal.
+
+//the pseudorandom number generator
+//by using the same seed and inputs, it produces the same sequence of random numbers, making the simulations reproducible
 nonisolated struct SplitMix64: RandomNumberGenerator, Sendable {
+    
+    //store generator's curr internal state
     private var state: UInt64
+    
+    //seed: the starting val
     init(seed: UInt64) { state = seed }
 
+    //SplitMix64 algorithm, the random num generation happens here
     mutating func next() -> UInt64 {
         state &+= 0x9e3779b97f4a7c15
         var value = state
@@ -19,7 +27,11 @@ nonisolated struct SplitMix64: RandomNumberGenerator, Sendable {
 nonisolated enum ForecastEngine {
     typealias Progress = @Sendable (Int) async -> Void
 
-    // Explicitly leave the caller's actor under the project's approachable concurrency settings.
+    //this func:
+    // - receives a forecasting req,
+    // - creates a seeded random num generator
+    // - passes it to simulate
+    //returns the resulting forecast
     @concurrent static func run(
         request: ForecastRequest, progress: Progress = { _ in }
     ) async throws -> ForecastResult {
@@ -27,28 +39,44 @@ nonisolated enum ForecastEngine {
         return try await simulate(request: request, generator: &generator, progress: progress)
     }
 
-    // A single sequential worker keeps memory bounded and the sampling order reproducible.
-    // Generic RNG injection also permits scripted fixtures without a second simulation algorithm.
+    //the main MC algorithm
     static func simulate<R: RandomNumberGenerator>(
         request: ForecastRequest, generator: inout R, progress: Progress = { _ in }
     ) async throws -> ForecastResult {
+        
+        //check that the inputs are valid and task hasn't been cancelled
         let months = try validate(request)
         try Task.checkCancellation()
         let input = request.context.inputs
         let assumptions = request.assumptions
         let count = assumptions.simulationCount
         let purchase = request.context.purchase?.amountMinor
+        
+        //calculate the deterministic outcome (baseline result assuming no variability) for comparison:
+        
+        //calculate monthly savings capacity
         let capacity = try subtract(input.incomeMinor, input.expensesMinor)
+        
+        //calculate deterministic baseline
         guard let deterministic = FinancialCalculator.balance(
             startingMinor: input.savingsMinor, monthlyCapacityMinor: capacity, months: months
         ) else { throw ForecastError.overflow }
+        
+        //calculate deterministic res after a purchase
         let deterministicPurchase = try purchase.map { try subtract(deterministic, $0) }
+        
+        
         if months == 0 {
             // No deposit means no random monthly amounts can affect this deadline.
+            //therefore, no reason to run the 5000 sims, so we immediately create the result based on user's curr savings
             let summary = ForecastPercentiles(lower: input.savingsMinor, median: input.savingsMinor, upper: input.savingsMinor)
             let after = try purchase.map { try summary.subtracting($0) }
+            
+            //create the first forecast sample
             var samples = [ForecastSample(date: input.evaluationDate, monthOffset: 0,
                                           baseline: summary, afterPurchase: after)]
+            
+            //add another sample at deadline if goal deadline is later than eval date
             if input.targetDate > input.evaluationDate {
                 samples.append(ForecastSample(date: input.targetDate, monthOffset: 0,
                                               baseline: summary, afterPurchase: after))
@@ -56,24 +84,37 @@ nonisolated enum ForecastEngine {
             await progress(0)
             await progress(100)
             try Task.checkCancellation()
+            
+            //construct and return the forecast result
+            //  - baselineSuccessCount: if curr savings >= target, all sims count as ssuccessful, otherwise none do
             return ForecastResult(request: request, samples: samples,
                                   baselineSuccessCount: input.savingsMinor >= input.targetMinor ? count : 0,
                                   purchaseSuccessCount: deterministicPurchase.map { $0 >= input.targetMinor ? count : 0 },
                                   deterministicBaselineMinor: deterministic, deterministicPurchaseMinor: deterministicPurchase,
                                   depositMonths: 0)
         }
+        
+        //create count amount of savings balances, each with the same initial savings amount
         var balances = [Int64](repeating: input.savingsMinor, count: count)
         var samples: [ForecastSample] = []
         samples.reserveCapacity(months + 2)
         var lastProgress = 0
         await progress(0)
 
+        
+        //run the simulations month by month
         for month in 0...months {
             if month > 0 {
+                
+                //loop through all simulation paths
                 for path in balances.indices {
                     if path % 256 == 0 { try Task.checkCancellation() }
-                    // Always consume four uniform draws, including zero amount/variability.
+                    
+                    
+                    //randomly generate this month's income
                     let income = try sample(input.incomeMinor, percent: assumptions.incomeVariability, generator: &generator)
+                    
+                    //randomly generate this month's expenses
                     let expenses = try sample(input.expensesMinor, percent: assumptions.expenseVariability, generator: &generator)
                     
                     //next balance = prev. balance + this month's income - this month's expenses
@@ -81,8 +122,16 @@ nonisolated enum ForecastEngine {
                     if let purchase { _ = try subtract(balances[path], purchase) }
                 }
             }
+            
+            //take the current month's savings balances and calculate 3 statistical vals:
+                //P10 - lower 10th percentile
+                //P50 - median balance
+                //upper 90th percentile
+            // sort balances from smallest to largest
             let summary = try percentiles(balances.sorted())
             try Task.checkCancellation()
+            
+            //add a forecast sample for this month
             samples.append(ForecastSample(
                 date: FinancialCalendar.clampedAnniversary(from: input.evaluationDate, addingMonths: month),
                 monthOffset: month, baseline: summary,
@@ -95,18 +144,30 @@ nonisolated enum ForecastEngine {
             }
         }
 
+        //check if last sample comes before deadline
         if let last = samples.last, last.date < input.targetDate {
             samples.append(ForecastSample(date: input.targetDate, monthOffset: months,
                                           baseline: last.baseline, afterPurchase: last.afterPurchase))
         }
+        
+        //caclulate pr of reaching the savings goal
         var successes = 0
         var purchaseSuccesses = 0
+        
+        //loop through the final balances
         for (index, balance) in balances.enumerated() {
             if index % 256 == 0 { try Task.checkCancellation() }
+            
+            //count successful baseline scenarios
+            //a success is when the balance >= target
             if balance >= input.targetMinor { successes += 1 }
+            
+            //count successful after purchase  scenarios
             if let purchase, try subtract(balance, purchase) >= input.targetMinor { purchaseSuccesses += 1 }
         }
         try Task.checkCancellation()
+        
+        //return the final forecast result, packaging all the simulation info into one obj
         return ForecastResult(request: request, samples: samples, baselineSuccessCount: successes,
                               purchaseSuccessCount: purchase == nil ? nil : purchaseSuccesses,
                               deterministicBaselineMinor: deterministic, deterministicPurchaseMinor: deterministicPurchase,

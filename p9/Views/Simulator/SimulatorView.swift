@@ -286,8 +286,8 @@ struct SimulatorView: View {
         }
     }
 
-    /// The selected goal, shown with the same card as Home so the right goal is visible
-    /// before calculating, even when several goals share a name.
+    // The selected goal, shown with the same card as Home so the right goal is visible
+    // before calculating, even when several goals share a name.
     private var selectedGoalReview: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Goal")
@@ -403,9 +403,13 @@ struct SimulatorView: View {
     private var previewAmount: Int64? {
         // A valid amount gets previewed before calculation; invalid text simply
         // waits for the Calculate button to show a validation message.
+        
+        //takes the amount user entered and converts it to that currency's minor units
         try? MoneyFormatting.parseMinorUnits(amount, currency: CurrencyDefinition.definition(for: purchaseCurrencyCode))
     }
 
+    
+    //Prepares the financial information needed for calculations
     private var financialDraftInputs: FinancialInputs? {
         guard let goal = selectedGoal else { return nil }
         return FinancialInputs(savingsMinor: profile.currentSavingsMinor, incomeMinor: profile.monthlyIncomeMinor,
@@ -494,6 +498,8 @@ struct SimulatorView: View {
         errorAttempt += 1
     }
 
+    
+    //this function performs the purchase evaluation
     private func calculateImpact() {
         focusedField = nil
         cancelLookup()
@@ -509,6 +515,7 @@ struct SimulatorView: View {
             return
         }
 
+        //convert amount from text into int64 minor units
         let currency = CurrencyDefinition.definition(for: purchaseCurrencyCode)
         let originalMinor: Int64
         do {
@@ -519,8 +526,8 @@ struct SimulatorView: View {
             return
         }
 
+        //Creates FinancialInputs using the profile's savings, income, expenses and selected goal.
         let evaluationDate = FinancialCalendar.localEvaluationDay()
-        // Build a snapshot of the current profile and selected goal values.
         let inputs = FinancialInputs(
             savingsMinor: profile.currentSavingsMinor,
             incomeMinor: profile.monthlyIncomeMinor,
@@ -557,9 +564,13 @@ struct SimulatorView: View {
                       FinancialCalendar.localEvaluationDay() == evaluationDate else {
                     throw EvaluationChangedError()
                 }
+                
+                //convert the amount
                 let converted = try CurrencyConversion.convert(originalMinor,
                     from: CurrencyDefinition.definition(for: sourceCurrency), to: CurrencyDefinition.definition(for: destinationCurrency),
                     rate: quote?.rate ?? 1, availableSavings: inputs.savingsMinor)
+                
+                //calculate the impact of the purchase
                 let result = try PurchaseImpactCalculator.evaluate(PurchaseImpactInputs(financialInputs: inputs, purchaseAmountMinor: converted)).get()
                 // A new calculation gets a new ID so saving it creates a distinct decision.
                 evaluation = PurchaseImpactEvaluation(
@@ -578,6 +589,8 @@ struct SimulatorView: View {
                     result: result,
                     conversion: quote.map { PurchaseConversion(originalAmountMinor: originalMinor, exchangeRate: $0) }
                 )
+                
+                //set to true to disp purchaseimpactview
                 isShowingResult = true
             } catch is CancellationError {
                 // Superseded requests never replace the current draft or result.

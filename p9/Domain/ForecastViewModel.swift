@@ -1,6 +1,10 @@
 import Foundation
 import Observation
 
+//This class manages the Monte Carlo forecasting process.
+//when a user starts a forecast, this class handles starting the calculation,
+//updating the progress percentage, receiving the result, cancelling, and detecting outdated results
+
 @MainActor @Observable
 final class ForecastViewModel {
     enum State: Equatable {

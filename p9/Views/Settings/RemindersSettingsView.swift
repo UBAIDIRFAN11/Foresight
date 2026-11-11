@@ -6,6 +6,8 @@ import SwiftData
 struct RemindersSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var reminderCoordinator: ReminderCoordinator
+    
+    //@AppStorage persists the Boolean in UserDefaults, so the pause setting is remembered even after restarting the app.
     @AppStorage("remindersPaused") private var remindersPaused = false
     @Query(sort: [SortDescriptor(\ReminderRecord.updatedAt, order: .reverse)]) private var reminders: [ReminderRecord]
     @Query private var decisions: [SavedDecision]
@@ -18,7 +20,10 @@ struct RemindersSettingsView: View {
                 Toggle("Pause All Reminders", isOn: Binding(
                     get: { remindersPaused },
                     set: {
+                        //$0 switches to true (when initially false, and vice versa)
                         remindersPaused = $0
+                        
+                        //tell coordinator to sync settings
                         reminderCoordinator.reconcile(in: modelContext, globallyPaused: $0, requestAuthorizationIfNeeded: !$0)
                     }
                 ))
@@ -85,6 +90,8 @@ struct RemindersSettingsView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            
+            //calls cancel func on reminder, which sets its isEnabled value to false, disabling the specific
             if reminder.isEnabled {
                 Button(role: .destructive) {
                     cancel(reminder)

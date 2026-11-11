@@ -1,24 +1,22 @@
 import Foundation
 import FoundationModels
 
-// Shared types for the on-device AI explanation feature.
-// Foresight remains the source of every number: snapshots copy already-calculated results,
-// and the model returns short prose that may quote only those figures, plus a next-step choice.
+//Defines the data structures used by the AI feature.
+//it doesn't generate the actual explanations it self, it just defines what the AI receives, what it should return, and how errors are represented.
 
 
-// Goal Detail: the displayed FinancialCalculator result plus its copied source.
+//Stores a copy of the information needed to explain a savings goal's progress.
 nonisolated struct GoalInsightSnapshot: Equatable, Sendable {
-    // Internal provenance used for freshness checks. The goal name is never sent to the model.
     let source: ForecastContext
     let result: FinancialCalculationResult
 }
 
-// Live Purchase Impact: values copied from PurchaseImpactEvaluation, which is not a cross-actor value.
+//Stores info about an evaluated purchase, including its amount, associated goal and calculated impact.
 nonisolated struct PurchaseInsightSnapshot: Equatable, Sendable {
     let evaluationID: UUID
     let goalID: UUID
     let currencyCode: String
-    let purchaseAmountMinor: Int64 // already converted into the profile currency
+    let purchaseAmountMinor: Int64
     let originalSavingsMinor: Int64
     let goalTargetMinor: Int64
     let goalTargetDate: Date
@@ -27,7 +25,7 @@ nonisolated struct PurchaseInsightSnapshot: Equatable, Sendable {
     let wasConverted: Bool
 }
 
-// Completed Monte Carlo result: deadline summary only (no seed, sample array or chart state).
+//Stores the key results of a completed Monte Carlo forecast, including success probabilities, percentiles and deterministic outcomes.
 nonisolated struct ForecastInsightSnapshot: Equatable, Sendable {
     let requestID: UUID
     let context: ForecastContext
@@ -49,51 +47,65 @@ nonisolated struct ForecastInsightSnapshot: Equatable, Sendable {
     var includesPurchase: Bool { purchaseSuccessCount != nil }
 }
 
+//supported explanation types.
+//They each receive a snapshot, which contains a copy of the relevant, already calculated info
 nonisolated enum FinancialInsightContext: Equatable, Sendable {
+    
+    //explains goal progression
     case goal(GoalInsightSnapshot)
+    
+    //explains impact of a hypothetical purchase on a goal
     case purchase(PurchaseInsightSnapshot)
+    
+    //explains probabalistic forecast results.
     case forecast(ForecastInsightSnapshot)
 }
 
-// A verified figure formatted by Foresight. Figures are supplied to the model and also define
-// which numbers the generated prose is allowed to quote.
+//Represents a verified financial figure calculated by the app
 nonisolated struct FinancialInsightFact: Identifiable, Equatable, Sendable {
     let id: String
     let label: String
     let value: String
 }
 
-// A scenario-specific next step. Foresight decides which steps apply and writes the text;
+// A scenario-specific next step. the app decides which steps apply and writes the text;
 // the model only chooses among them.
 nonisolated struct FinancialInsightSuggestion: Equatable, Sendable {
     let step: FinancialInsightNextStep
     let text: String
 }
 
-// Created once per explicit button tap. Everything the sheet and the model need is copied in.
+// Created once per explicit button tap.
+//this contains everything needed to generate an explanation.
 nonisolated struct FinancialInsightRequest: Identifiable, Equatable, Sendable {
     let id: UUID
+    
+    //the type of financial result being explained
     let context: FinancialInsightContext
     let title: String
     // The result the user already sees on the originating screen.
     let status: String
     // Verified figures copied from the existing result.
     let facts: [FinancialInsightFact]
-    // Relationships between those figures, calculated by Foresight with checked arithmetic,
-    // so the model can explain them without calculating anything itself.
+    
+    //pre-calculated comparisons between figures
     let relationships: [String]
-    // Short context rules, e.g. that percentile balances are not probabilities.
+    
+    //instructions for interpreting the results correctly
     let rules: [String]
+    
     // What the summary and the key consideration should focus on for this scenario.
     let focus: String
     let considerationFocus: String
+    
     // Relevant next steps for this scenario, most relevant first.
     let suggestions: [FinancialInsightSuggestion]
-    // One concise, app-authored uncertainty sentence shown with the disclaimer.
+    
     let uncertaintyNote: String
 
     var permittedNextSteps: [FinancialInsightNextStep] { suggestions.map(\.step) }
 
+    //assign the supplied vals to the request's properties
     init(id: UUID = UUID(), context: FinancialInsightContext, title: String, status: String,
          facts: [FinancialInsightFact], relationships: [String], rules: [String], focus: String,
          considerationFocus: String, suggestions: [FinancialInsightSuggestion], uncertaintyNote: String) {
@@ -112,9 +124,11 @@ nonisolated struct FinancialInsightRequest: Identifiable, Equatable, Sendable {
 }
 
 
-// Kinds of next step. Which ones apply, and their wording, are decided per scenario.
+//@Generable tells the Foundation models framework that the AI can generate a value of this type
 @Generable
 nonisolated enum FinancialInsightNextStep: String, CaseIterable, Equatable, Sendable {
+    
+    //the model chooses from the defined enum cases.
     case reviewProfile
     case reviewGoal
     case compareSmallerPurchase
@@ -123,21 +137,20 @@ nonisolated enum FinancialInsightNextStep: String, CaseIterable, Equatable, Send
     case testPurchase
 }
 
-// Typed model output. There are no numeric fields: any figure in the prose must be one
-// Foresight supplied, which FinancialInsightValidator checks before display.
+//this generates the raw AI response (not necessarily the final one shown to user)
 @Generable
 nonisolated struct GeneratedFinancialInsight: Equatable, Sendable {
     @Guide(description: "Two or three short sentences addressed to you. Explain why the result is what it is and what it implies, quoting the relevant verified figures exactly. Do not just restate the status.")
-    let summary: String
+    let summary: String //main explanation
 
     @Guide(description: "One sentence about the key point named in the prompt, adding something not already in the summary. Quote verified figures exactly if useful.")
-    let keyConsideration: String
+    let keyConsideration: String //another important key point to consider
 
     @Guide(description: "The most relevant next step from the options listed in the prompt.")
-    let nextStep: FinancialInsightNextStep
+    let nextStep: FinancialInsightNextStep //a suggested action selected from the predefined options
 }
 
-// Accepted output. Presentation only ever consumes this type.
+// Accepted output.
 nonisolated struct ValidatedFinancialInsight: Equatable, Sendable {
     let summary: String
     let keyConsideration: String

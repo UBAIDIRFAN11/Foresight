@@ -1,18 +1,30 @@
 import SwiftUI
 import SwiftData
 
+//Lets the user configure Monte Carlo forecasting before running it.
+//this file is not responsible for executing the MC sim. It just prepares it and navigates to ForecastResultsView
+
+//stores a forecasting session
 struct ForecastSession: Identifiable {
     let id = UUID()
+    
+    //store financial info and goal being forecast
     let context: ForecastContext
+    
+    //MC forecasting uses random variations for income/expenses.
+    //So, seed enables reproducibility, as it's the number used to initialise the random num generator for Monte Carlo sims
     let seed: UInt64
 
     init(context: ForecastContext) {
         self.context = context
+        
+        //generate random seed once when a session is created
         var generator = SystemRandomNumberGenerator()
-        seed = generator.next()
+        seed = generator.next() //generates random value of type UInt64
     }
 }
 
+//the btn that opens forecasting
 struct ForecastCallout: View {
     let isEnabled: Bool
     var accessibilityFocus: AccessibilityFocusState<Bool>.Binding
@@ -37,6 +49,7 @@ struct ForecastCallout: View {
     }
 }
 
+//the main forecast setup screen
 struct ForecastFlowView: View {
     let session: ForecastSession
     var originIsCurrent: Bool = true
@@ -54,10 +67,15 @@ struct ForecastFlowView: View {
     @State private var errorMessage: String?
     @State private var errorAttempt = 0
 
+    //checks whether financial info has changed
     private var sourceMatches: Bool {
+        
+        //ensure original context is still curr, a FinancialProfile exists, and the orig. goal exists.
         guard originIsCurrent,
               let profile = FinancialProfilePolicy.selectedProfile(from: profiles),
               let goal = goals.first(where: { $0.id == session.context.goalID }) else { return false }
+        
+        //construct fresh ForecastContext and compare with orig. Return true if identical
         return ForecastSource.context(profile: profile, goal: goal, evaluationDay: evaluationDay,
                                       purchase: session.context.purchase) == session.context
     }
@@ -141,14 +159,25 @@ struct ForecastFlowView: View {
         do { try validateSource() } catch { invalidated = true }
     }
 
+    //this function is used to prepare the simulation and open the results screen.
     private func run() {
         do {
+            
+            //check financial info still valid
             try validateSource()
+            
+            //package the context, income/expense var, and seed
             let next = ForecastRequest(context: session.context, assumptions: ForecastAssumptions(
                 incomeVariability: Int(incomeVariation), expenseVariability: Int(expenseVariation), seed: session.seed))
+            
+            //check whether the request is acceptable
             _ = try ForecastEngine.validate(next)
             errorMessage = nil
+            
+            //store the request
             request = next
+            
+            //open the results screen
             showsResults = true
         } catch {
             if error as? ForecastError == .staleSource { invalidated = true }
@@ -157,6 +186,7 @@ struct ForecastFlowView: View {
     }
 }
 
+//the percentage sliders
 private struct ForecastVariabilityControl: View {
     let title: String
     @Binding var value: Double
@@ -168,6 +198,8 @@ private struct ForecastVariabilityControl: View {
             AdaptiveValueRow(title: title, value: "\(Int(value))%")
             Slider(value: $value, in: 0...100, step: 1) { Text(title) }
                 .accessibilityValue("\(Int(value)) percent")
+            
+            //calculate the corresponding min/max monthly amounts using ForecastEngine.scaledAmount
             if let lower = try? ForecastEngine.scaledAmount(expectedMinor, percent: Int(value), u: -10_000, v: -10_000),
                let upper = try? ForecastEngine.scaledAmount(expectedMinor, percent: Int(value), u: 10_000, v: 10_000) {
                 Text("\(MoneyFormatting.display(lower, currencyCode: currencyCode)) to \(MoneyFormatting.display(upper, currencyCode: currencyCode)) per month")
@@ -179,6 +211,7 @@ private struct ForecastVariabilityControl: View {
     }
 }
 
+//displays the financial info being used in the forecast
 struct ForecastContextCard: View {
     let context: ForecastContext
 

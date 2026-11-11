@@ -1,9 +1,10 @@
-// Wraps UserNotifications behind a small protocol so permission state,
-// scheduling, cancellation, and Settings access stay testable and replaceable.
 import Foundation
 import UserNotifications
 import UIKit
 
+//Provides the interface through which the app communicates with iOS notifications.
+
+//Represents the possible notification permission states.
 enum NotificationPermissionState: Equatable {
     case notDetermined
     case denied
@@ -26,6 +27,7 @@ enum NotificationPermissionState: Equatable {
     }
 }
 
+//Stores the device's notification settings, such as whether alerts and sounds are enabled.
 struct NotificationDeliverySettings: Equatable {
     let permissionState: NotificationPermissionState
     let alertsEnabled: Bool
@@ -46,6 +48,7 @@ struct NotificationDeliverySettings: Equatable {
     }
 }
 
+//This defines what operations a notification client must support, without implementing them
 protocol NotificationClient {
     func deliverySettings() async -> NotificationDeliverySettings
     func requestAuthorization() async throws -> Bool
@@ -57,10 +60,15 @@ protocol NotificationClient {
     func openSettings()
 }
 
+//the actual implementation of the notification client protocol
 struct SystemNotificationClient: NotificationClient {
+    
+    //gives access to Apple's notif system
     private let center = UNUserNotificationCenter.current()
 
     func deliverySettings() async -> NotificationDeliverySettings {
+        
+        //get notif settings
         let settings = await center.notificationSettings()
         let state: NotificationPermissionState
         switch settings.authorizationStatus {
@@ -84,6 +92,7 @@ struct SystemNotificationClient: NotificationClient {
         )
     }
 
+    //function to request notif disp permission
     func requestAuthorization() async throws -> Bool {
         try await center.requestAuthorization(options: [.alert, .sound])
     }
@@ -92,8 +101,11 @@ struct SystemNotificationClient: NotificationClient {
         await center.pendingNotificationRequests().map(\.identifier)
     }
 
+    //receives a PlannedReminder and schedules in with IOS
     func schedule(_ reminder: PlannedReminder) async throws {
         let content = UNMutableNotificationContent()
+        
+        //create the notif content
         content.title = reminder.title
         content.body = reminder.body
         content.sound = .default
@@ -105,8 +117,11 @@ struct SystemNotificationClient: NotificationClient {
         ]
 
         let trigger: UNNotificationTrigger
+        
+        //check whether reminder is one-time or weekly
         switch reminder.trigger {
         case .oneTime(let dateComponents):
+            //scheudle a reminder for a specific dt, non-repeating
             trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: false)
         case .weekly(let weekday, let hour, let minute, let timeZone):
             var components = DateComponents()
@@ -115,9 +130,12 @@ struct SystemNotificationClient: NotificationClient {
             components.weekday = weekday
             components.hour = hour
             components.minute = minute
+            
+            //schedule recurring weekly notif
             trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
         }
 
+        //schedule the notif with IOS
         let request = UNNotificationRequest(identifier: reminder.requestIdentifier, content: content, trigger: trigger)
         try await center.add(request)
     }

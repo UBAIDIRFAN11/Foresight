@@ -1,8 +1,12 @@
 import Foundation
 import SwiftData
 
+//Handles profile selection, creation, focus preferences and goal deletion safely.
+
 @MainActor
 enum FinancialProfilePolicy {
+    
+    //this function is called when the user changes their preferred focus goal.
     static func saveFocusPreference(
         _ id: UUID?, for profile: FinancialProfile, in context: ModelContext,
         save: (() throws -> Void)? = nil
@@ -28,6 +32,8 @@ enum FinancialProfilePolicy {
             for profile in profiles where profile.preferredFocusGoalID == goal.id {
                 profile.preferredFocusGoalID = nil
             }
+            
+            //fetch and delete the associated reminders
             let reminders = try context.fetch(FetchDescriptor<ReminderRecord>())
             for reminder in reminders where reminder.kind == .goalCheckIn && reminder.sourceID == goal.id {
                 context.delete(reminder)

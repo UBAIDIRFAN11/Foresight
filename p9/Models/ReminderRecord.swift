@@ -1,18 +1,35 @@
-// SwiftData model for reminder intent. Notifications are derived from these
-// records so saved configuration survives permission changes and app relaunches.
 import Foundation
 import SwiftData
 
+//This class defines how reminders are stored in SwiftData.
+
+//it just stores what user wants schedulued, doesn't actually itself create the IOS notification.
+
 @Model
 final class ReminderRecord {
+    //each reminder contains:
+    
+    //unique identifier for the notif
     @Attribute(.unique) var requestIdentifier: String
+    
+    //whether it'sa pruchase or goal reminder
     var kindRawValue: String
+    
+    //uuid of associated purchase or goal
     var sourceID: UUID
+    
+    //whther reminder is enabled or not
     var isEnabled: Bool
+    
+    //date for a one-time purchase reminder
     var deliveryDate: Date?
+    
+    //schedule for weekly goal reminder
     var weekday: Int
     var hour: Int
     var minute: Int
+    
+    //date when purchase reminder has been reviewed, or nil if it hasn't
     var reviewedAt: Date?
     var scheduleRevision: UUID
     var updatedAt: Date
@@ -44,6 +61,7 @@ final class ReminderRecord {
     }
 }
 
+//defines the two types of reminders
 enum ReminderKind: String, Codable, CaseIterable {
     case purchaseReview
     case goalCheckIn

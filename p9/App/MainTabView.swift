@@ -23,6 +23,8 @@ struct MainTabView: View {
     @State private var savedNotice: SavedDecisionNotice?
 
     var body: some View {
+        
+        //create bottom tab bar
         TabView(selection: $router.selectedTab) {
             NavigationStack {
                 HomeView(

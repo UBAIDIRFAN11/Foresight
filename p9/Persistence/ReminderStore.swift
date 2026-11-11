@@ -1,23 +1,27 @@
-// Performs reminder create/update/cancel/review writes with explicit saves and
-// rollback so failed persistence never changes notification scheduling.
 import Foundation
 import SwiftData
 
+//Manages saving, updating and deleting reminder records.
+
 @MainActor
 enum ReminderStore {
+    //saves a live purchase decision and its reminder
     static func saveLivePurchaseReminder(
         evaluation: PurchaseImpactEvaluation, deliveryDate: Date, in context: ModelContext,
         now: Date = Date(), calendar: Calendar = .current,
         saveOperation: (() throws -> Void)? = nil
     ) throws -> SavedDecision {
-        // Keep a successfully saved decision if reminder persistence fails. A retry
-        // reuses its evaluation ID, while still checking freshness again.
+        
+        //save the evaluated purchase decision
         let decision = try SavedDecisionStore.saveLive(evaluation, in: context, now: now, calendar: calendar)
+        
+        //create/update its reminder
         _ = try upsertPurchaseReminder(for: decision, deliveryDate: deliveryDate, in: context,
                                       now: now, saveOperation: saveOperation)
         return decision
     }
 
+    //creates or updates a purchase reminder
     static func upsertPurchaseReminder(
         for decision: SavedDecision,
         deliveryDate: Date,
@@ -25,10 +29,16 @@ enum ReminderStore {
         now: Date = Date(),
         saveOperation: (() throws -> Void)? = nil
     ) throws -> ReminderRecord {
+        
+        //reject past/curr reminders
         guard deliveryDate > now else {
             throw ReminderPlanningError.expiredPurchaseReminder
         }
+        
+        //check if another active reminder is allowed
         try validateCapacity(enablingSourceID: decision.evaluationID, kind: .purchaseReview, in: context, now: now)
+        
+        //find existing reminder or create a new one
         let record = try existing(kind: .purchaseReview, sourceID: decision.evaluationID, in: context) ?? ReminderRecord(
             requestIdentifier: ReminderKind.requestIdentifier(kind: .purchaseReview, sourceID: decision.evaluationID),
             kind: .purchaseReview,
@@ -44,6 +54,8 @@ enum ReminderStore {
         }
     }
 
+    
+    //create or update a weekly goal check in reminder
     static func upsertGoalReminder(
         for goal: FinancialGoal,
         weekday: Int,
@@ -54,12 +66,18 @@ enum ReminderStore {
         now: Date = Date(),
         saveOperation: (() throws -> Void)? = nil
     ) throws -> ReminderRecord {
+        
+        //validate
         guard (1...7).contains(weekday), (0...23).contains(hour), (0...59).contains(minute) else {
             throw ReminderPlanningError.invalidWeeklyComponents
         }
+        
+        //check reminder capacity if it's being enabled
         if isEnabled {
             try validateCapacity(enablingSourceID: goal.id, kind: .goalCheckIn, in: context, now: now)
         }
+        
+        //find the goal's existing reminder or create a new one with the supplied weekly settings
         let record = try existing(kind: .goalCheckIn, sourceID: goal.id, in: context) ?? ReminderRecord(
             requestIdentifier: ReminderKind.requestIdentifier(kind: .goalCheckIn, sourceID: goal.id),
             kind: .goalCheckIn,
@@ -69,6 +87,8 @@ enum ReminderStore {
             hour: hour,
             minute: minute
         )
+        
+        //Update the enabled status, weekly schedule, revision identifier and modification time, then save
         return try update(record, in: context, saveOperation: saveOperation) {
             $0.isEnabled = isEnabled
             $0.weekday = weekday
@@ -79,7 +99,10 @@ enum ReminderStore {
         }
     }
 
+    //defines a func to disable a reminder
     static func cancel(_ record: ReminderRecord, in context: ModelContext) throws {
+        
+        //disables reminder, changes its revision id, records the update time and saves it.
         _ = try update(record, in: context) {
             $0.isEnabled = false
             $0.scheduleRevision = UUID()
@@ -87,7 +110,10 @@ enum ReminderStore {
         }
     }
 
+    //Defines a function to mark a reminder as reviewed.
     static func markReviewed(_ record: ReminderRecord, in context: ModelContext) throws {
+        
+        //record Date when reviewed
         _ = try update(record, in: context) {
             $0.reviewedAt = Date()
             $0.isEnabled = false
@@ -96,8 +122,12 @@ enum ReminderStore {
         }
     }
 
+    //used to find an existing reminder
     static func existing(kind: ReminderKind, sourceID: UUID, in context: ModelContext) throws -> ReminderRecord? {
         let identifier = ReminderKind.requestIdentifier(kind: kind, sourceID: sourceID)
+        
+        //create SwiftData query that only matches with the specific identifier
+        //#predicate defines the filtering condition
         var descriptor = FetchDescriptor<ReminderRecord>(
             predicate: #Predicate<ReminderRecord> { record in
                 record.requestIdentifier == identifier
@@ -107,6 +137,7 @@ enum ReminderStore {
         return try context.fetch(descriptor).first
     }
 
+    //used to postpose a reminder
     static func snooze(
         sourceID: UUID, revision: UUID?, in context: ModelContext, now: Date = Date(),
         calendar: Calendar = .current, saveOperation: (() throws -> Void)? = nil
@@ -126,11 +157,14 @@ enum ReminderStore {
         return true
     }
 
+    //Defines the shared function for modifying and saving reminder records.
     private static func update(
         _ record: ReminderRecord, in context: ModelContext, saveOperation: (() throws -> Void)? = nil,
         mutation: (ReminderRecord) -> Void
     ) throws -> ReminderRecord {
         let wasPersisted = record.modelContext != nil
+        
+        //capture previous reminder values so they can be restored if saving fails.
         let previous = ReminderSnapshot(record: record, title: "", body: "")
         let updatedAt = record.updatedAt
         if !wasPersisted { context.insert(record) }
@@ -155,6 +189,7 @@ enum ReminderStore {
         }
     }
 
+    //Check the reminder limit
     private static func validateCapacity(
         enablingSourceID: UUID, kind: ReminderKind, in context: ModelContext, now: Date
     ) throws {

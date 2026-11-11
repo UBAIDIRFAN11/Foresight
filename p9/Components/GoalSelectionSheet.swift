@@ -4,7 +4,7 @@
 import SwiftUI
 import SwiftData
 
-/// An optional "no specific goal" choice, worded by each caller (for example "Automatic").
+//an optional "no specific goal" choice, worded by each caller (for example "Automatic").
 struct GoalSelectionNoneOption {
     let title: String
     let detail: String

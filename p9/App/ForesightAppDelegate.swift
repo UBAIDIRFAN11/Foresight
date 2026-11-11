@@ -1,8 +1,8 @@
-// Registers local notification categories and forwards notification taps/actions
-// into the SwiftUI router without putting financial logic in the app delegate.
 import UIKit
 import UserNotifications
 import SwiftData
+
+//handles notification events coming from IOS
 
 final class ForesightAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
@@ -59,6 +59,7 @@ final class ForesightAppDelegate: NSObject, UIApplicationDelegate, UNUserNotific
     }
 }
 
+//used to extract info from a notif, such as its reminder type and associated UUID
 struct ReminderNotificationPayload {
     let kind: ReminderKind
     let sourceID: UUID

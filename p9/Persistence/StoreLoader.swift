@@ -2,14 +2,18 @@ import Foundation
 import Observation
 import SwiftData
 
+//this is used to open the local SwiftData database safely
+
 @MainActor
 @Observable
 final class StoreLoader {
+    
+    //enum to define the possible loading states
     enum Phase {
-        case idle
-        case loading
-        case ready(ModelContainer)
-        case failed
+        case idle //hasnt started loading
+        case loading //currently loading
+        case ready(ModelContainer) //successfully loaded
+        case failed //could not load
     }
 
     private(set) var phase: Phase = .idle
@@ -24,19 +28,25 @@ final class StoreLoader {
         case .loading, .ready: return
         case .idle, .failed: break
         }
+        
+        //change state to loading,
         phase = .loading
-        // Give SwiftUI an opportunity to display progress before opening the store.
+        
+        //attempt to create db container, then change state to ready or failed
         await Task.yield()
         do {
             let container = try factory()
+            
+            //writes must be explicitly saved
             container.mainContext.autosaveEnabled = false
+            
             phase = .ready(container)
         } catch {
-            // Never delete the store, expose its path, or log financial data.
             phase = .failed
         }
     }
 
+    //configures the persistent db to store the 4 model types
     static func makeContainer() throws -> ModelContainer {
         let schema = Schema([FinancialProfile.self, FinancialGoal.self, SavedDecision.self, ReminderRecord.self])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)

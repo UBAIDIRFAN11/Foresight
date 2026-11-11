@@ -17,8 +17,8 @@ struct SavedDecisionNotice: Equatable {
 
     var message: String { "Saved “\(purchaseName)” to History." }
 
-    /// The notice belongs to the saved record, so it only applies while History is
-    /// showing that exact decision.
+    // The notice belongs to the saved record, so it only applies while History is
+    // showing that exact decision.
     func applies(selectedTab: MainTabView.AppTab, historyPath: [UUID]) -> Bool {
         selectedTab == .history && historyPath.last == evaluationID
     }

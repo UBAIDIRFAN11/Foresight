@@ -63,6 +63,9 @@ nonisolated enum FinancialInsightValidator {
         "remains on track", "stays on track", "still on track"
     ]
 
+    //The function checks the generated text and either:
+    // - Returns a ValidatedFinancialInsight if acceptable.
+    // - Throws an error if the response violates the rules.
     static func validate(_ generated: GeneratedFinancialInsight,
                          for request: FinancialInsightRequest) throws -> ValidatedFinancialInsight {
         let summary = generated.summary.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -1,7 +1,7 @@
-// Shows the live goal calculation and owns the optional weekly check-in reminder
-// controls for that specific goal.
 import SwiftUI
 import SwiftData
+
+//used to display all the details about a specific goal.
 
 struct GoalDetailView: View {
     @Environment(\.dismiss) private var dismiss

@@ -1,6 +1,7 @@
 import SwiftUI
 import Charts
 
+//visualises the results from ForecastEngine
 
 struct ForecastChart: View {
     let result: ForecastResult
@@ -181,12 +182,16 @@ struct ForecastChart: View {
         let name = purchase ? "With Purchase" : "Baseline"
         let color = purchase ? Color.blue : ForesightTheme.accent
         let emphasized = purchase == withPurchase
+        
+        //shade the p10-p90 range
         AreaMark(x: .value("Date", displayDate(sample.date)),
                  yStart: .value("10th percentile", amount(values.lower)),
                  yEnd: .value("90th percentile", amount(values.upper)),
                  series: .value("Scenario", name))
             .interpolationMethod(.stepEnd)
             .foregroundStyle(color.opacity(emphasized ? 0.23 : 0.08))
+        
+        //linemark for mediun savings trajectory
         LineMark(x: .value("Date", displayDate(sample.date)), y: .value("Median", amount(values.median)),
                  series: .value("Scenario", name))
             .interpolationMethod(.stepEnd)

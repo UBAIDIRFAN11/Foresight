@@ -1,5 +1,7 @@
 import Foundation
 
+//defines the data structures used throughout forecasting
+
 nonisolated struct ForecastPurchase: Equatable, Sendable {
     let evaluationID: UUID
     let name: String

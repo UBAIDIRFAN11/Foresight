@@ -19,6 +19,8 @@ enum GoalPriority: Int, CaseIterable, Identifiable {
 struct HomeFocusSelection {
     var selectedID: UUID?
 
+    //if current focused goal still exists, do nothing
+    //otherwise, select user's preferred goal, or 1st sorted goal if preference unavailable
     mutating func reconcile(sortedIDs: [UUID], preferredID: UUID?) {
         guard let selectedID, sortedIDs.contains(selectedID) else {
             applyDefault(sortedIDs: sortedIDs, preferredID: preferredID)

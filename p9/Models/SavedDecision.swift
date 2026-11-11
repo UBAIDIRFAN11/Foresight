@@ -1,6 +1,8 @@
 import Foundation
 import SwiftData
 
+//Defines how purchase evaluations are stored permanently in SwiftData.
+
 @Model
 final class SavedDecision {
     //saved decisions are flat snapshots. They intentionally copy goal/profile

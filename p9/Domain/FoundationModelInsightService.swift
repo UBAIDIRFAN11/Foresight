@@ -1,8 +1,10 @@
 import Foundation
 import FoundationModels
 
-// Generation boundary. The view model depends on this protocol so tests can inject
-// controlled fakes; production uses the on-device system language model.
+//the purpose of this is to communicate with Apple's on-device language model.
+//it's the component that actually generates the AI text
+
+//defines 2 operations that the AI service must support: availability and generating explanation.
 @MainActor
 protocol FinancialInsightGenerating {
     func availability() -> FinancialInsightAvailability
@@ -10,12 +12,12 @@ protocol FinancialInsightGenerating {
                   sampling: FinancialInsightSampling) async throws -> GeneratedFinancialInsight
 }
 
-// On-device Foundation Models implementation. It receives copied values only and never
-// logs prompts, responses or financial values. Default guardrails are kept.
+//implement the protocol using apple's on-device language model
 @MainActor
 struct FoundationModelInsightService: FinancialInsightGenerating {
     private let model = SystemLanguageModel.default
 
+    //AI instruction prompt
     static let instructions = """
     You explain financial results inside Foresight, a personal savings app. Foresight has already \
     calculated every figure and relationship in the prompt, and the user can already see the main result. \
@@ -45,18 +47,22 @@ struct FoundationModelInsightService: FinancialInsightGenerating {
     - Choose nextStep only from the next steps listed in the prompt.
     """
 
-    // Retries only: modest nucleus sampling so a rejected response is not reproduced exactly,
-    // while still favouring the model's most likely wording.
+    //to configure how responses are generated
     static func options(for sampling: FinancialInsightSampling) -> GenerationOptions {
         switch sampling {
+            
+        //chooses most likely next tokens, producing repeatable results for the same input
         case .deterministic:
             GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 512)
+        
+        //introduce some variation when retrying a rejected response
         case .varied:
             GenerationOptions(samplingMode: .random(probabilityThreshold: 0.8), temperature: 0.5,
                               maximumResponseTokens: 512)
         }
     }
 
+    //function to check model availability
     func availability() -> FinancialInsightAvailability {
         switch model.availability {
         case .available:
@@ -73,28 +79,36 @@ struct FoundationModelInsightService: FinancialInsightGenerating {
         }
     }
 
+    //This func receives the financial info and generation settings
     func generate(for request: FinancialInsightRequest,
                   sampling: FinancialInsightSampling) async throws -> GeneratedFinancialInsight {
-        // Check immediately before generation, because availability can change while the app runs.
+        
+        //check immediately before generation, because availability can change while the app runs.
         guard availability() == .available else { throw FinancialInsightFailure.assetsUnavailable }
-        // A fresh session per attempt: no transcript carries over between explanations or retries.
+        
+        //create a fresh conversation with apple's language model using our predefined instructions
         let session = LanguageModelSession(instructions: Self.instructions)
+        
+        //generate the response
         do {
+            
+            //call to apple's AI model
             let response = try await session.respond(
                 to: Self.prompt(for: request),
                 generating: GeneratedFinancialInsight.self,
                 options: Self.options(for: sampling)
             )
+            
+            //return the raw ai generated explanation
             return response.content
         } catch {
             throw Self.failure(for: error)
         }
     }
 
-    // MARK: - Prompts
+    //Prompts:
 
-    // Hybrid prompt: verified figures and Foresight-calculated relationships, so the model can
-    // explain implications in concrete terms without doing any arithmetic itself.
+    //Converts the prepared financial request into text the AI can understand.
     static func prompt(for request: FinancialInsightRequest) -> String {
         let facts = request.facts.map { "- \($0.label): \($0.value)" }.joined(separator: "\n")
         let relationships = request.relationships.map { "- \($0)" }.joined(separator: "\n")
@@ -122,7 +136,7 @@ struct FoundationModelInsightService: FinancialInsightGenerating {
         """
     }
 
-    // MARK: - Error mapping
+    //Error mapping:
 
     // Normalises framework errors into safe UI states. Cancellation passes through unchanged.
     static func failure(for error: any Error) -> any Error {
@@ -151,7 +165,6 @@ struct FoundationModelInsightService: FinancialInsightGenerating {
         return nil
     }
 
-    // iOS 26 reports generation failures through the older GenerationError type.
     @available(iOS, introduced: 26.0, deprecated: 27.0)
     private static func legacyFailure(for error: any Error) -> FinancialInsightFailure? {
         guard let error = error as? LanguageModelSession.GenerationError else { return nil }

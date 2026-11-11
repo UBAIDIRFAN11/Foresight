@@ -1,5 +1,8 @@
 import Foundation
 
+//cleans names and descriptions, ensures goal names aren't empty,
+//and checks that goal targets are greater than zero.
+
 enum FinancialFormValidation {
     static func cleanName(_ value: String) -> String {
         // Names are saved without accidental leading/trailing whitespace.

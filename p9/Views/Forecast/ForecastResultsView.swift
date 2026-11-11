@@ -1,5 +1,9 @@
 import SwiftUI
 
+//displays the forecast results after the simulation finishes working.
+
+//uses ForecastViewModel to start and monitor the simulation
+
 struct ForecastResultsView: View {
     let request: ForecastRequest
     let sourceIsCurrent: Bool
